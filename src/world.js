@@ -17,8 +17,9 @@ const V=(x,y,z)=>new Vector3(x,y,z);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 
 export class CityWorld {
-  constructor(scene,camera,buildingCount=22){
+  constructor(scene,camera,buildingCount=22,options={}){
     this.scene=scene; this.camera=camera;
+    this.mobile=!!options.mobile;
     this.buildingCount=Math.max(1,Math.min(30,Math.round(buildingCount)));
     this.structures=[];this.buildings=[];this.props=[];this.trees=[];this.debris=[];
     this.fragments=[];this.rubble=[];this.pendingFailures=[];this.slabFractures=[];this.maxFragmentBodies=260;
@@ -66,7 +67,7 @@ export class CityWorld {
     const sun=new DirectionalLight('afternoon-sun',V(-.55,-1,.42),s);
     sun.position=V(85,160,-65);sun.intensity=1.14;sun.diffuse=hex('#fff0d1');
     this.sun=sun;this.hemi=hemi;
-    this.shadow=new ShadowGenerator(2048,sun);
+    this.shadow=new ShadowGenerator(this.mobile?512:2048,sun);
     this.shadow.usePercentageCloserFiltering=true;
     this.shadow.filteringQuality=ShadowGenerator.QUALITY_MEDIUM;
     this.shadow.bias=.0005;
@@ -534,6 +535,7 @@ export class CityWorld {
   }
 
   createBurst(position,type='dust',amount=240,power=1){
+    if(this.mobile)amount=Math.min(amount,type==='dust'?44:52);
     const tex=this.getParticleTexture();
     const system=new ParticleSystem('volumetric '+type,amount,this.scene);
     system.particleTexture=tex;system.emitter=position.clone();

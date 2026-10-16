@@ -8,16 +8,25 @@ import {DisasterSystem} from './disasters.js';
 import {PhysicsViewer} from '@babylonjs/core/Debug/physicsViewer';
 import {ShadowGenerator} from '@babylonjs/core/Lights/Shadows/shadowGenerator';
 import './ui.css';
+import './mobile.css';
 
 const $=selector=>document.querySelector(selector);
 const $$=selector=>[...document.querySelectorAll(selector)];
 const canvas=$('#renderCanvas');
-const engine=new Engine(canvas,true,{stencil:true,preserveDrawingBuffer:false,alpha:false,antialias:true,powerPreference:'high-performance'});
-engine.setHardwareScalingLevel(Math.max(1.55,window.devicePixelRatio*1.15));
+const mobileDevice=/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)||
+  (matchMedia('(pointer:coarse)').matches&&Math.min(screen.width,screen.height)<820);
+document.documentElement.classList.toggle('mobile-device',mobileDevice);
+const compactLayout=()=>matchMedia('(max-width:1200px) and (max-height:660px) and (orientation:landscape), (pointer:coarse) and (orientation:landscape) and (max-height:850px), (max-width:600px) and (orientation:portrait)').matches;
+let mobileResolutionFactor=1.0,mobileFpsTimer=0;
+const engine=new Engine(canvas,true,{stencil:true,preserveDrawingBuffer:false,alpha:false,
+  antialias:true,powerPreference:'high-performance'});
+engine.setHardwareScalingLevel(mobileDevice?mobileResolutionFactor:
+  Math.max(1.55,window.devicePixelRatio*1.15));
 let scene,camera,world,disasters,pipeline;
 let havoc=null;
 let selected='meteor',power=.75,paused=false,speed=1;
-let buildingCount=22;
+let buildingCount=mobileDevice?10:22;
+$('#housesCount').value=String(buildingCount);
 let simTime=0,lastTick=performance.now(),fpsTimer=0;
 let rebuilding=false,soundsOn=true,qualityHigh=false,cinematic=false;
 let physicsViewer=null;
@@ -49,6 +58,12 @@ function logEvent(title,detail){
 function setStatus(text,sub='Ready to deploy'){$('#statusText').textContent=text;$('#statusSub').textContent=sub;}
 function selectTool(type){
   selected=type;
+  $$('.mobile-tool').forEach(el=>{
+    const active=el.dataset.mobileTool===type;
+    el.classList.toggle('is-active',active);
+    el.setAttribute('aria-pressed',String(active));
+  });
+  if(compactLayout())setMobileMenu(false);
   const intensity=$('#power');
   intensity.min=type==='meteor'?'1':'15';
   if(type!=='meteor'&&Number(intensity.value)<15)intensity.value='15';
@@ -78,6 +93,7 @@ async function changeBuildingCount(count){
   const value=Math.max(1,Math.min(30,Math.round(Number(count)||1)));
   buildingCount=value;$('#housesCount').value=String(value);
   updateBuildingsLabel();
+  if(compactLayout())setMobileMenu(false);
   if(rebuilding)return;
   toast('CITY DENSITY: '+value+' BUILDING'+(value===1?'':'S'),'Regenerating physics world');
   await createGame();
@@ -94,8 +110,15 @@ function updateStats(dt){
   $('#activeBodies').textContent=two(world.activeBodies);
   $('#impacts').textContent=two(world.impactCount);
   $('#fps').textContent=Math.round(engine.getFps());
+  $('#mobileIntegrity').textContent=integrity+'%';
+  $('#mobileFps').textContent=Math.round(engine.getFps());
   $('#damage').textContent=(100-integrity)+'%';
   $('#clock').textContent=timestamp();
+}
+function setMobileMenu(open){
+  $('#app').classList.toggle('mobile-menu-open',!!open);
+  $('#mobileMenuBtn').setAttribute('aria-expanded',String(!!open));
+  $('#mobileMenuBtn').setAttribute('aria-label',open?'Close disaster controls':'Open disaster controls');
 }
 function callbacks(){
   return {
@@ -173,32 +196,47 @@ function cycleCamera(){
   toast(['ISOMETRIC VIEW','HIGH-ALTITUDE VIEW','CLOSE-UP VIEW'][cameraIndex]);
 }
 function applyQuality(){
-  engine.setHardwareScalingLevel(qualityHigh?Math.max(1,window.devicePixelRatio*.85):Math.max(1.55,window.devicePixelRatio*1.15));
-  if(pipeline){
-    pipeline.bloomEnabled=qualityHigh;
-    pipeline.fxaaEnabled=qualityHigh;
-    pipeline.samples=qualityHigh?2:1;
+  if(mobileDevice){
+    // Babylon's default Engine does NOT automatically multiply the backing
+    // framebuffer by devicePixelRatio. Using DPR here caused a 3x upscale
+    // (310x143 on a 932x430 phone), making everything visibly blocky.
+    engine.setHardwareScalingLevel(qualityHigh?.84:mobileResolutionFactor);
+  }else{
+    engine.setHardwareScalingLevel(qualityHigh?Math.max(1,window.devicePixelRatio*.85):
+      Math.max(1.55,window.devicePixelRatio*1.15));
   }
-  if(world?.sun)world.sun.shadowEnabled=qualityHigh;
-  if(scene)scene.fogMode=qualityHigh?scene.FOGMODE_EXP2:scene.FOGMODE_NONE;
+  if(pipeline){
+    pipeline.bloomEnabled=!mobileDevice&&qualityHigh;
+    pipeline.fxaaEnabled=!mobileDevice&&qualityHigh;
+    pipeline.samples=!mobileDevice&&qualityHigh?2:1;
+  }
+  if(world?.sun)world.sun.shadowEnabled=!mobileDevice&&qualityHigh;
+  if(scene)scene.fogMode=(!mobileDevice&&qualityHigh)?scene.FOGMODE_EXP2:scene.FOGMODE_NONE;
   if(world?.shadow){
     world.shadow.setDarkness(qualityHigh?.18:.24);
-    world.shadow.filteringQuality=qualityHigh?ShadowGenerator.QUALITY_MEDIUM:ShadowGenerator.QUALITY_LOW;
+    world.shadow.filteringQuality=(!mobileDevice&&qualityHigh)?
+      ShadowGenerator.QUALITY_MEDIUM:ShadowGenerator.QUALITY_LOW;
   }
   if(world){
-    // PERF keeps visual rubble but significantly limits simultaneously ACTIVE
-    // Havok bodies. Loose chunks may be reactivated by a tornado later.
-    world.maxFragmentBodies=qualityHigh?260:155;
-    world.maxPrimaryFragmentBodies=qualityHigh?175:112;
-    world.maxDebris=qualityHigh?110:46;
-    world.maxSecondaryPerWindow=qualityHigh?16:9;
+    world.maxFragmentBodies=mobileDevice?(qualityHigh?100:72):(qualityHigh?260:155);
+    world.maxPrimaryFragmentBodies=mobileDevice?(qualityHigh?72:50):(qualityHigh?175:112);
+    world.maxDebris=mobileDevice?(qualityHigh?25:16):(qualityHigh?110:46);
+    world.maxSecondaryPerWindow=mobileDevice?(qualityHigh?6:4):(qualityHigh?16:9);
+    world.maxWallVisualPerWindow=mobileDevice?7:14;
+    world.maxVisualFragments=mobileDevice?(qualityHigh?190:140):290;
   }
-  $('#settingsBtn span').textContent=qualityHigh?'ULTRA':'PERF';
+  $('#settingsBtn span').textContent=mobileDevice?(qualityHigh?'SHARP':'MOBILE'):(qualityHigh?'ULTRA':'PERF');
+  $('#settingsBtn').setAttribute('aria-label',mobileDevice?(qualityHigh?'Switch to smooth mobile graphics':'Switch to sharper mobile graphics'):(qualityHigh?'Switch to performance graphics':'Switch to ultra graphics'));
+  $('#settingsBtn').title=mobileDevice?
+    (qualityHigh?'Switch to faster mobile graphics':'Switch to sharper mobile graphics'):
+    'Toggle quality';
 }
 function switchQuality(){
   qualityHigh=!qualityHigh;
+  if(mobileDevice)mobileResolutionFactor=1.0;
   applyQuality();
-  toast(qualityHigh?'ULTRA QUALITY':'PERFORMANCE MODE');
+  toast(mobileDevice?(qualityHigh?'SHARP MOBILE':'MOBILE PERFORMANCE'):
+    (qualityHigh?'ULTRA QUALITY':'PERFORMANCE MODE'));
 }
 function togglePhysicsViewer(){
   if(physicsViewer){physicsViewer.dispose();physicsViewer=null;toast('PHYSICS COLLIDERS HIDDEN');return}
@@ -225,12 +263,13 @@ async function createGame(){
   if(scene){scene.dispose();scene=null;world=null;disasters=null}
   scene=new Scene(engine);
   // Dynamic impact effects need material updates, so retain Babylon's standard priority.
-  camera=new ArcRotateCamera('free orbit camera',-Math.PI*.67,1.05,165,new Vector3(0,10,0),scene);
+  camera=new ArcRotateCamera('free orbit camera',-Math.PI*.67,1.05,mobileDevice?130:165,new Vector3(0,10,0),scene);
   camera.attachControl(canvas,true);
   camera.lowerRadiusLimit=36;camera.upperRadiusLimit=240;
   camera.lowerBetaLimit=.18;camera.upperBetaLimit=Math.PI*.47;
   camera.wheelDeltaPercentage=.014;camera.panningSensibility=260;
-  camera.angularSensibilityX=1100;camera.angularSensibilityY=1100;
+  camera.angularSensibilityX=mobileDevice?1600:1100;camera.angularSensibilityY=mobileDevice?1600:1100;
+  camera.pinchDeltaPercentage=mobileDevice?.008:0;
   camera.inertia=.82;camera.minZ=.1;camera.maxZ=2000;
   scene.activeCamera=camera;cameraIndex=0;
   if(!havoc)havoc=await HavokPhysics();
@@ -238,12 +277,14 @@ async function createGame(){
   scene.enablePhysics(new Vector3(0,-18,0),plugin);
   scene.getPhysicsEngine().setTimeStep(1/60);
   $('#loadingText').textContent='CONSTRUCTING SIMULATED CITY...';
-  world=new CityWorld(scene,camera,buildingCount);
+  world=new CityWorld(scene,camera,buildingCount,{mobile:mobileDevice});
   const groundPhysics=new PhysicsAggregate(world.ground,PhysicsShapeType.BOX,{mass:0,friction:.93,restitution:.06},scene);
   const islandPhysics=new PhysicsAggregate(scene.getMeshByName('island slab'),PhysicsShapeType.BOX,{mass:0,friction:.92},scene);
   world.groundPhysics=groundPhysics;world.islandPhysics=islandPhysics;
   $('#loadingText').textContent='CALIBRATING VISUAL EFFECTS...';
+  pipeline=null;
   try{
+    if(!mobileDevice){
     pipeline=new DefaultRenderingPipeline('filmic color grading',true,scene,[camera]);
     pipeline.samples=2;pipeline.fxaaEnabled=true;
     pipeline.bloomEnabled=true;pipeline.bloomThreshold=.73;pipeline.bloomWeight=.23;pipeline.bloomKernel=42;
@@ -251,6 +292,7 @@ async function createGame(){
     pipeline.imageProcessing.exposure=.89;pipeline.imageProcessing.contrast=1.09;
     pipeline.imageProcessing.vignetteEnabled=true;pipeline.imageProcessing.vignetteWeight=1.2;
     pipeline.imageProcessing.vignetteStretch=.1;
+    }
   }catch(e){console.warn('Post-processing fallback',e)}
   disasters=new DisasterSystem(world,callbacks());
   disasters.audioEnabled=soundsOn;
@@ -261,11 +303,11 @@ async function createGame(){
   $('#events').innerHTML='';
   logEvent('City rebuilt','Physics world reset and ready');
   updateStats(1);
-  setStatus('CHOOSE A TARGET TO BEGIN','Use the mouse to aim anywhere in the city');
+  setStatus('CHOOSE A TARGET TO BEGIN',mobileDevice?'Tap city to strike · drag to orbit · pinch to zoom':'Use the mouse to aim anywhere in the city');
   rebuilding=false;
   setTimeout(()=>$('#loading').classList.add('is-done'),330);
   window.disasterDebug={
-    getPerf:()=>({fps:engine.getFps(),drawCalls:engine._drawCalls?.current??null,meshes:scene.meshes.length,activeMeshes:scene.getActiveMeshes().length,activeIndices:scene.getActiveIndices(),hardwareScale:engine.getHardwareScalingLevel(),width:engine.getRenderWidth(),height:engine.getRenderHeight(),shadows:world.shadow.getShadowMap()?.getSize()?.width||0,batching:world.staticBatchStats,quality:qualityHigh?'ULTRA':'PERF'}),
+    getPerf:()=>({fps:engine.getFps(),drawCalls:engine._drawCalls?.current??null,meshes:scene.meshes.length,activeMeshes:scene.getActiveMeshes().length,activeIndices:scene.getActiveIndices(),hardwareScale:engine.getHardwareScalingLevel(),width:engine.getRenderWidth(),height:engine.getRenderHeight(),shadows:world.shadow.getShadowMap()?.getSize()?.width||0,batching:world.staticBatchStats,mobile:mobileDevice,quality:mobileDevice?(qualityHigh?'SHARP':'MOBILE'):(qualityHigh?'ULTRA':'PERF')}),
     getState:()=>({fps:engine.getFps(),buildings:world.buildings.length,requestedBuildings:buildingCount,floors:world.totalFloors,broken:world.brokenFloors,
     activeBodies:world.activeBodies,impacts:world.impactCount,integrity:world.integrity(),activeEffects:disasters.effects.length,craneJointActive:!!world.crane,fragments:world.fragments.length,shadowMapSize:world.shadow.getShadowMap()?.getSize().width,pendingFailures:world.pendingFailures.length,slabFractures:world.slabFractures.length,slabSplitCounts:world.slabFractures.slice(-30).map(s=>s.requestedParts),slabPhysicalParts:world.slabFractures.reduce((a,s)=>a+s.physicalParts,0),slabStaticParts:world.slabFractures.reduce((a,s)=>a+s.staticParts,0),
     fallingVisual:world.visualFragments.length,visibleRubble:world.rubble.length,
@@ -297,6 +339,10 @@ async function createGame(){
 }
 function bindUI(){
   $$('.tool').forEach(t=>t.addEventListener('click',()=>selectTool(t.dataset.tool)));
+  $$('.mobile-tool').forEach(t=>t.addEventListener('click',()=>selectTool(t.dataset.mobileTool)));
+  $('#mobileMenuBtn').addEventListener('click',()=>setMobileMenu(!$('#app').classList.contains('mobile-menu-open')));
+  $('#mobileCloseBtn').addEventListener('click',()=>setMobileMenu(false));
+  $('#mobileDrawerBackdrop').addEventListener('click',()=>setMobileMenu(false));
   $('#power').addEventListener('input',updatePower);updatePower();
   $('#housesCount').addEventListener('input',updateBuildingsLabel);
   $('#housesCount').addEventListener('change',e=>changeBuildingCount(e.target.value));
@@ -315,14 +361,22 @@ function bindUI(){
   $('#helpBtn').addEventListener('click',()=>$('#helpModal').classList.remove('hidden'));
   $('#closeHelp').addEventListener('click',()=>$('#helpModal').classList.add('hidden'));
   $('#helpModal').addEventListener('click',e=>{if(e.target.id==='helpModal')e.target.classList.add('hidden')});
-  canvas.addEventListener('pointerdown',e=>{pointerStart={x:e.clientX,y:e.clientY,time:performance.now()};});
+  canvas.addEventListener('pointerdown',e=>{
+    pointerStart={x:e.clientX,y:e.clientY,time:performance.now(),type:e.pointerType};
+  });
   canvas.addEventListener('pointerup',e=>{
     if(!pointerStart)return;
-    const d=Math.hypot(e.clientX-pointerStart.x,e.clientY-pointerStart.y);
+    const start=pointerStart;
+    const d=Math.hypot(e.clientX-start.x,e.clientY-start.y);
     pointerStart=null;
-    if(d<7 && e.button===0){const {x,y}=pointerCoordinates(e);deployAt(surfacePoint(x,y))}
+    const isTap=d<(e.pointerType==='touch'?17:7)&&
+      performance.now()-start.time<(e.pointerType==='touch'?500:650);
+    if(isTap&&(e.button===0||e.pointerType==='touch')){
+      const {x,y}=pointerCoordinates(e);deployAt(surfacePoint(x,y));
+    }
   });
-  canvas.addEventListener('pointermove',updateCursor);
+  canvas.addEventListener('pointercancel',()=>{pointerStart=null});
+  canvas.addEventListener('pointermove',e=>{if(e.pointerType!=='touch')updateCursor(e)});
   canvas.addEventListener('pointerleave',()=>$('#targetCursor').style.opacity='0');
   canvas.addEventListener('contextmenu',e=>e.preventDefault());
   document.addEventListener('keydown',e=>{
@@ -333,9 +387,9 @@ function bindUI(){
     else if(e.key.toLowerCase()==='c')cycleCamera();
     else if(e.key.toLowerCase()==='h')$('#app').classList.toggle('ui-hidden');
     else if(e.key.toLowerCase()==='p')togglePhysicsViewer();
-    else if(e.key==='Escape')$('#helpModal').classList.add('hidden');
+    else if(e.key==='Escape'){$('#helpModal').classList.add('hidden');setMobileMenu(false)}
   });
-  window.addEventListener('resize',()=>engine.resize());
+  window.addEventListener('resize',()=>{engine.resize();if(!compactLayout())setMobileMenu(false)});
 }
 bindUI();
 engine.runRenderLoop(()=>{
