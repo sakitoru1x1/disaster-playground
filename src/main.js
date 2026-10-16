@@ -5,10 +5,12 @@ import {
 import HavokPhysics from '@babylonjs/havok';
 import {CityWorld} from './world.js';
 import {DisasterSystem} from './disasters.js';
+import {WalkController} from './walkController.js';
 import {PhysicsViewer} from '@babylonjs/core/Debug/physicsViewer';
 import {ShadowGenerator} from '@babylonjs/core/Lights/Shadows/shadowGenerator';
 import './ui.css';
 import './mobile.css';
+import './walk.css';
 
 const $=selector=>document.querySelector(selector);
 const $$=selector=>[...document.querySelectorAll(selector)];
@@ -22,7 +24,7 @@ const engine=new Engine(canvas,true,{stencil:true,preserveDrawingBuffer:false,al
   antialias:true,powerPreference:'high-performance'});
 engine.setHardwareScalingLevel(mobileDevice?mobileResolutionFactor:
   Math.max(1.55,window.devicePixelRatio*1.15));
-let scene,camera,world,disasters,pipeline;
+let scene,camera,world,disasters,pipeline,walk=null;
 let havoc=null;
 let selected='meteor',power=.75,paused=false,speed=1;
 let buildingCount=mobileDevice?10:22;
@@ -192,7 +194,43 @@ function cycleSpeed(){
   if(scene&&!paused)scene.getPhysicsEngine()?.setTimeStep((1/60)*speed);
   toast('SIMULATION SPEED: '+speed+'×');
 }
+function toggleWalkMode(){
+  if(!walk||rebuilding)return;
+  walk.setEnabled(!walk.enabled);
+  const active=walk.enabled;
+  $('#walkBtn').classList.toggle('is-active',active);
+  $('#walkBtn').setAttribute('aria-pressed',String(active));
+  $('#walkBtn span').textContent=active?'EXIT WALK':'WALK';
+  $('#targetCursor').style.opacity='0';
+  setMobileMenu(false);
+  toast(active?'STREET VIEW ENABLED':'ORBIT CAMERA ENABLED',
+    active?(mobileDevice?'Left stick: move · swipe: look · STRIKE: disaster':
+      'WASD: move · mouse: look · F: disaster · V: exit'):'');
+  if(active)walk.lockPointer();
+}
+function walkTarget(){
+  if(!walk?.enabled||!world)return null;
+  const ray=walk.camera.getForwardRay(140);
+  let hit=null,best=140;
+  for(const part of world.structures){
+    if(part.active||part.mesh.isDisposed())continue;
+    const result=ray.intersectsMesh(part.mesh,false);
+    if(result?.hit&&result.distance>0&&result.distance<best){
+      best=result.distance;hit=part.mesh.getAbsolutePosition().clone();
+    }
+  }
+  if(hit)return hit;
+  const t=ray.intersectsPlane(new Plane(0,1,0,0));
+  const dist=t!==null&&t>1&&t<100?t:35;
+  const point=ray.origin.add(ray.direction.scale(dist));
+  point.y=0;
+  point.x=Math.max(-80,Math.min(80,point.x));
+  point.z=Math.max(-80,Math.min(80,point.z));
+  return point;
+}
+function walkStrike(){if(walk?.enabled)deployAt(walkTarget())}
 function cycleCamera(){
+  if(walk?.enabled){toggleWalkMode();return}
   cameraIndex=(cameraIndex+1)%cameraAngles.length;
   const [a,b,r]=cameraAngles[cameraIndex];
   camera.alpha=a;camera.beta=b;camera.radius=r;
@@ -263,6 +301,7 @@ async function createGame(){
   $('#loading').classList.remove('is-done');
   $('#loadingText').textContent='INITIALIZING PHYSICS ENGINE...';
   if(physicsViewer){physicsViewer.dispose();physicsViewer=null}
+  if(walk){walk.dispose();walk=null;document.documentElement.classList.remove('walk-mode','walk-locked');$('#walkBtn').classList.remove('is-active');$('#walkBtn').setAttribute('aria-pressed','false');$('#walkBtn span').textContent='WALK'}
   if(scene){scene.dispose();scene=null;world=null;disasters=null}
   scene=new Scene(engine);
   // Dynamic impact effects need material updates, so retain Babylon's standard priority.
@@ -281,6 +320,7 @@ async function createGame(){
   scene.getPhysicsEngine().setTimeStep(1/60);
   $('#loadingText').textContent='CONSTRUCTING SIMULATED CITY...';
   world=new CityWorld(scene,camera,buildingCount,{mobile:mobileDevice});
+  walk=new WalkController(scene,canvas,camera,world,mobileDevice);
   const groundPhysics=new PhysicsAggregate(world.ground,PhysicsShapeType.BOX,{mass:0,friction:.93,restitution:.06},scene);
   const islandPhysics=new PhysicsAggregate(scene.getMeshByName('island slab'),PhysicsShapeType.BOX,{mass:0,friction:.92},scene);
   world.groundPhysics=groundPhysics;world.islandPhysics=islandPhysics;
@@ -421,6 +461,8 @@ async function createGame(){
       asphaltTexture:!!world.materials.road.diffuseTexture,
       pavementTexture:!!world.materials.sidewalk.diffuseTexture,
       sun:world.sun.intensity,ambient:world.hemi.intensity}),
+    getWalk:()=>walk?.info(),
+    toggleWalk:()=>toggleWalkMode(),
     getBuildings:()=>world.buildings.map(b=>({id:b.id,x:b.floors[0].mesh.position.x,z:b.floors[0].mesh.position.z,
       floors:b.floors.length,topY:b.floors.at(-1).mesh.position.y})),
     getPick:(x,y)=>{const p=surfacePoint(x,y);return p?{x:p.x,y:p.y,z:p.z}:null},
@@ -480,6 +522,13 @@ function bindUI(){
   $('#pauseBtn').addEventListener('click',togglePause);
   $('#speedBtn').addEventListener('click',cycleSpeed);
   $('#cameraBtn').addEventListener('click',cycleCamera);
+  $('#walkBtn').addEventListener('click',toggleWalkMode);
+  $('#walkStrikeBtn').addEventListener('click',walkStrike);
+  const stick=$('#walkJoystick'),thumb=$('#walkStick');
+  stick.addEventListener('pointerdown',e=>walk?.startJoystick(e,stick,thumb));
+  stick.addEventListener('pointermove',e=>walk?.updateJoystick(e,stick,thumb));
+  for(const name of ['pointerup','pointercancel','lostpointercapture'])
+    stick.addEventListener(name,e=>walk?.releaseJoystick(e,thumb));
   $('#resetBtn').addEventListener('click',()=>createGame());
   $('#settingsBtn').addEventListener('click',switchQuality);
   $('#fullscreenBtn').addEventListener('click',toggleFullscreen);
@@ -494,9 +543,15 @@ function bindUI(){
   $('#closeHelp').addEventListener('click',()=>$('#helpModal').classList.add('hidden'));
   $('#helpModal').addEventListener('click',e=>{if(e.target.id==='helpModal')e.target.classList.add('hidden')});
   canvas.addEventListener('pointerdown',e=>{
+    if(walk?.enabled){
+      if(e.pointerType==='touch')walk.beginTouchLook(e);
+      else if(e.button===0)walk.lockPointer();
+      return;
+    }
     pointerStart={x:e.clientX,y:e.clientY,time:performance.now(),type:e.pointerType};
   });
   canvas.addEventListener('pointerup',e=>{
+    if(walk?.enabled){walk.endTouchLook(e);return}
     if(!pointerStart)return;
     const start=pointerStart;
     const d=Math.hypot(e.clientX-start.x,e.clientY-start.y);
@@ -507,12 +562,18 @@ function bindUI(){
       const {x,y}=pointerCoordinates(e);deployAt(surfacePoint(x,y));
     }
   });
-  canvas.addEventListener('pointercancel',()=>{pointerStart=null});
-  canvas.addEventListener('pointermove',e=>{if(e.pointerType!=='touch')updateCursor(e)});
+  canvas.addEventListener('pointercancel',e=>{pointerStart=null;walk?.endTouchLook(e)});
+  canvas.addEventListener('pointermove',e=>{
+    if(walk?.enabled){walk.moveTouchLook(e);return}
+    if(e.pointerType!=='touch')updateCursor(e);
+  });
   canvas.addEventListener('pointerleave',()=>$('#targetCursor').style.opacity='0');
   canvas.addEventListener('contextmenu',e=>e.preventDefault());
   document.addEventListener('keydown',e=>{
     if(e.target instanceof HTMLInputElement)return;
+    if(walk?.key(e.code,true)){e.preventDefault();return}
+    if(e.key.toLowerCase()==='v'){toggleWalkMode();return}
+    if(e.key.toLowerCase()==='f'&&walk?.enabled){walkStrike();return}
     if(['1','2','3','4'].includes(e.key))selectTool(['meteor','tornado','quake','tsunami'][Number(e.key)-1]);
     else if(e.code==='Space'){e.preventDefault();togglePause()}
     else if(e.key.toLowerCase()==='r')createGame();
@@ -521,6 +582,7 @@ function bindUI(){
     else if(e.key.toLowerCase()==='p')togglePhysicsViewer();
     else if(e.key==='Escape'){$('#helpModal').classList.add('hidden');setMobileMenu(false)}
   });
+  document.addEventListener('keyup',e=>{if(walk?.key(e.code,false))e.preventDefault()});
   window.addEventListener('resize',()=>{engine.resize();if(!compactLayout())setMobileMenu(false)});
   window.addEventListener('orientationchange',()=>setTimeout(()=>engine.resize(),240));
   syncFullscreenUI();
@@ -530,6 +592,7 @@ window.addEventListener('pagehide',()=>DisasterSystem.closeSharedAudio());
 engine.runRenderLoop(()=>{
   if(!scene)return;
   const dt=Math.min(engine.getDeltaTime()/1000,.065);
+  if(!rebuilding)walk?.update(dt);
   if(!rebuilding&&!paused){
     const scaled=dt*speed;
     simTime+=scaled;
