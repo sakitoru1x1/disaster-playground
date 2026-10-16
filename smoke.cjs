@@ -1,0 +1,25 @@
+const {chromium}=require('playwright');
+(async()=>{
+ const browser=await chromium.launch({headless:true,executablePath:'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',args:['--enable-gpu','--no-sandbox']});
+ const page=await browser.newPage({viewport:{width:1440,height:850},deviceScaleFactor:1});
+ const errors=[],badUrls=[];
+ page.on('pageerror',e=>errors.push(String(e.stack||e)));
+ page.on('response',r=>{if(r.status()>=400)badUrls.push(r.status()+' '+r.url())});
+ await page.goto('http://127.0.0.1:5173',{waitUntil:'domcontentloaded'});
+ await page.waitForFunction(()=>!!window.disasterDebug,{timeout:30000});
+ await page.waitForTimeout(1900);
+ console.log('INITIAL',JSON.stringify(await page.evaluate(()=>window.disasterDebug.getState())));
+ await page.screenshot({path:'smoke-initial.png'});
+ await page.keyboard.press('p');await page.waitForTimeout(250);
+ console.log('PHYSICS_VIEWER',await page.evaluate(()=>document.body.innerText.includes('PHYSICS COLLIDERS HIDDEN')?'off':'key triggered'));
+ await page.keyboard.press('p');
+ await page.evaluate(()=>window.disasterDebug.deploy('meteor',10,2,.9));
+ await page.waitForTimeout(3800);
+ console.log('METEOR',JSON.stringify(await page.evaluate(()=>window.disasterDebug.getState())));
+ await page.screenshot({path:'smoke-impact.png'});
+ await page.evaluate(()=>window.disasterDebug.deploy('quake',-24,18,.9));
+ await page.waitForTimeout(900);
+ console.log('QUAKE',JSON.stringify(await page.evaluate(()=>window.disasterDebug.getState())));
+ console.log('ERRORS',JSON.stringify(errors));console.log('MISSING',JSON.stringify(badUrls));
+ await browser.close();
+})().catch(e=>{console.error('SMOKE_FAILED',e);process.exitCode=1});

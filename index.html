@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta name="theme-color" content="#09121e"/><meta name="description" content="Disaster Playground — a physically simulated city of spectacular catastrophes. Powered by Babylon.js + Havok."/>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' fill='%230a1927'/%3E%3Ctext x='10' y='34' font-size='32' fill='%23edb46f'%3E✳%3C/text%3E%3C/svg%3E"/><title>DISASTER / PLAYGROUND — Physics Sandbox</title></head>
+<body>
+<canvas id="renderCanvas" aria-label="Interactive three-dimensional disaster simulation"></canvas>
+<div class="grain"></div>
+<div id="app">
+  <header class="topbar">
+    <div class="brand"><div class="brand-icon"><span class="brand-cross">✳</span></div><div class="brand-copy"><div class="brand-overline">A PHYSICS EXPERIMENT</div><div class="brand-name">DISASTER<span class="brand-slash"> / </span>PLAYGROUND</div></div></div>
+    <div class="top-center"><span class="live-dot"></span><span>LIVE SIMULATION</span><span class="top-separator"></span><span id="clock">00:00</span></div>
+    <div class="top-actions"><button id="cameraBtn" class="icon-action" title="Switch camera (C)">◉ <span>CAMERA</span></button><button id="soundBtn" class="icon-action" title="Toggle sound">♫ <span>SOUND ON</span></button><button id="settingsBtn" class="icon-action" title="Toggle quality">⚙ <span>ULTRA</span></button><button id="helpBtn" class="icon-action round" title="Controls and help">?</button></div>
+  </header>
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <div class="section-kicker"><span class="kicker-bar"></span> MISSION CONTROL <span class="kicker-right">01 / 04</span></div>
+      <h1>THE WORLD<br/><em>IS YOURS.</em></h1>
+      <p class="intro">Small city. Big consequences. Select a disaster, aim anywhere, and unleash controlled chaos.</p>
+      <div class="separator"></div>
+      <div class="subsection-title">SELECT DISASTER <span>01 — 04</span></div>
+      <div id="tools" class="tool-list">
+        <button class="tool is-active" data-tool="meteor"><span class="tool-symbol meteor-symbol">☄</span><span class="tool-main"><strong>METEOR STRIKE</strong><small>Impact / shockwave / fire</small></span><span class="tool-key">1</span></button>
+        <button class="tool" data-tool="tornado"><span class="tool-symbol tornado-symbol">◈</span><span class="tool-main"><strong>TORNADO</strong><small>Vortex / lift / debris</small></span><span class="tool-key">2</span></button>
+        <button class="tool" data-tool="quake"><span class="tool-symbol quake-symbol">≋</span><span class="tool-main"><strong>EARTHQUAKE</strong><small>Seismic waves / collapse</small></span><span class="tool-key">3</span></button>
+        <button class="tool" data-tool="tsunami"><span class="tool-symbol tsunami-symbol">≈</span><span class="tool-main"><strong>TSUNAMI</strong><small>Water surge / displacement</small></span><span class="tool-key">4</span></button>
+      </div>
+      <div class="separator"></div>
+      <div class="subsection-title">DISASTER INTENSITY <span id="powerValue">75%</span></div>
+      <div class="intensity-row"><span>LOW</span><div class="range-wrap"><input type="range" id="power" min="15" max="100" value="75" aria-label="Disaster intensity"/><div class="range-fill" id="rangeFill"></div></div><span>EXTREME</span></div>
+      <div class="power-label"><span id="powerDescription">SEVERE DAMAGE</span><span>LVL <span id="powerLevel">04</span></span></div>
+      <div class="tip-box"><span class="tip-icon">◎</span><p><strong>HOW TO PLAY</strong><br/>Click anywhere on the city to deploy. Drag to orbit. Scroll to zoom.</p></div>
+      <button id="randomBtn" class="random-btn"><span>✦</span> SURPRISE ME <span class="random-arrow">↗</span></button>
+    </div>
+  </aside>
+  <div class="target-cursor" id="targetCursor"><span></span><span></span><span></span><span></span><b>IMPACT ZONE</b></div>
+  <div class="location-label"><span class="location-pulse">◉</span> <span>SECTOR 07 — COASTAL CITY</span><span class="location-coord" id="locationCoords">00.00 / 00.00</span></div>
+  <div class="right-panel">
+    <div class="stats-heading">CITY STATUS <span>REAL-TIME</span></div>
+    <div class="stat-big"><span id="integrity">100</span><sup>%</sup><small>STRUCTURAL INTEGRITY</small></div>
+    <div class="integrity-track"><div id="integrityBar"></div></div>
+    <div class="stat-grid"><div><span>ACTIVE BODIES</span><strong id="activeBodies">00</strong></div><div><span>IMPACTS</span><strong id="impacts">00</strong></div><div><span>SIMULATION FPS</span><strong id="fps">60</strong></div><div><span>DESTRUCTION</span><strong id="damage">0%</strong></div></div>
+    <div class="event-heading">EVENT LOG <span class="event-live">● FEED</span></div>
+    <div id="events" class="events"><div class="event"><span>00:00</span><div><b>System initialized</b><small>City ready for simulation</small></div></div></div>
+  </div>
+  <div class="bottom-bar">
+    <div class="bottom-left"><span class="bottom-orb">◉</span><div><b>HAVOK PHYSICS</b><small>REAL-TIME RIGID BODY ENGINE</small></div><div class="engine-line"></div><div><b>BABYLON.JS</b><small>REAL-TIME 3D RENDERING</small></div></div>
+    <div class="bottom-center"><span class="command-mark">⌖</span><strong id="statusText">CHOOSE A TARGET TO BEGIN</strong><span id="statusSub">Ready to deploy</span></div>
+    <div class="bottom-controls"><button id="pauseBtn" title="Pause / Resume (Space)"><span id="pauseIcon">Ⅱ</span> PAUSE</button><button id="speedBtn" title="Change simulation speed">1× SPEED</button><button id="resetBtn" class="reset-control" title="Reset city (R)">↻ RESET CITY</button></div>
+  </div>
+  <div class="toast-host" id="toasts"></div>
+  <div class="loading" id="loading"><div class="loading-symbol">✳</div><div class="loading-title">DISASTER / PLAYGROUND</div><div class="loading-desc" id="loadingText">GENERATING PHYSICAL WORLD...</div><div class="loading-track"><div></div></div><div class="loading-foot">BABYLON.JS <span>×</span> HAVOK</div></div>
+  <div id="helpModal" class="modal-backdrop hidden"><div class="modal"><button id="closeHelp" class="modal-close">×</button><div class="section-kicker">OPERATIONS MANUAL</div><h2>YOUR WORLD.<br/><em>YOUR RULES.</em></h2><p>Four natural disasters, one miniature coastal city, and real-time rigid-body physics. Buildings are assembled from physical sections and react to actual impulses and collisions.</p><div class="help-grid"><span><b>LEFT CLICK</b> Deploy disaster</span><span><b>DRAG</b> Orbit camera</span><span><b>SCROLL</b> Zoom camera</span><span><b>1 – 4</b> Select disaster</span><span><b>SPACE</b> Pause simulation</span><span><b>R</b> Rebuild the city</span><span><b>C</b> Change camera</span><span><b>H</b> Toggle interface</span><span><b>P</b> Physics collider viewer</span></div><div class="help-footer">ENGINE STACK <strong>BABYLON.JS + HAVOK WASM</strong></div></div></div>
+</div><script type="module" src="/src/main.js"></script></body></html>
