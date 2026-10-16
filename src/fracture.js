@@ -2,6 +2,7 @@ import {MeshBuilder, PhysicsAggregate, PhysicsShapeType, Vector3, VertexBuffer, 
 import {chooseSlabSplitCount,partitionSlab} from './slabs.js';
 import {attachSecondaryCollision} from './secondaryFracture.js';
 import {facadeAppearance,paintFragment} from './rubbleAppearance.js';
+import {createBrokenSlab} from './slabMesh.js';
 
 // Destructible modular buildings: panels, columns, and individually fractured slabs.
 // Havok handles rigid-body motion and collisions, not concrete stress propagation.
@@ -51,8 +52,9 @@ function spawnPhysical(world,entry,origin,local,size,kind,face,impulse,slabId=nu
   const accent=world.materials.wallsAccent[entry.building.style||0];
   const material=kind==='slab'?world.materials.concrete:
     kind==='column'?accent:pick(entry.mesh.material,accent);
-  const shard=jaggedBlock(world.scene,size,material,'fractured '+kind);
-  shard.metadata={kind,fragmentSize:size.slice()};
+  const shard=kind==='slab'?createBrokenSlab(world.scene,size,'fractured slab'):
+    jaggedBlock(world.scene,size,material,'fractured '+kind);
+  shard.metadata={...shard.metadata,kind,fragmentSize:size.slice()};
   paintFragment(world,shard,facadeAppearance(world,entry,kind));
   shard.position=origin.add(local);
   shard.rotation=V(rand(-.055,.055),rand(-.07,.07),rand(-.055,.055));
@@ -84,8 +86,9 @@ function spawnPhysical(world,entry,origin,local,size,kind,face,impulse,slabId=nu
 function spawnVisualRubble(world,entry,origin,local,size,kind,impulse,slabId=null){
   if(world.visualFragments.length>=world.maxVisualFragments)return false;
   const material=kind==='slab'?world.materials.concrete:entry.mesh.material;
-  const shard=jaggedBlock(world.scene,size,material,'visually simulated falling '+kind);
-  shard.metadata={kind,fragmentSize:size.slice()};
+  const shard=kind==='slab'?createBrokenSlab(world.scene,size,'visually simulated falling slab'):
+    jaggedBlock(world.scene,size,material,'visually simulated falling '+kind);
+  shard.metadata={...shard.metadata,kind,fragmentSize:size.slice()};
   paintFragment(world,shard,facadeAppearance(world,entry,kind));
   shard.position=origin.add(local);
   shard.rotation=V(rand(-.09,.09),rand(-.19,.19),rand(-.09,.09));
@@ -154,8 +157,8 @@ export function fractureStorey(world,entry,impulse,impactAt){
     }else{
       // Max both budgets: retain a single visible piece of the floor in place.
       // It is intentionally NOT teleported away.
-      const mesh=jaggedBlock(world.scene,size,world.materials.concrete,'retained slab shard');
-      mesh.metadata={kind:'slab',slabId,fragmentSize:size.slice(),retained:true};
+      const mesh=createBrokenSlab(world.scene,size,'retained slab shard');
+      mesh.metadata={...mesh.metadata,kind:'slab',slabId,fragmentSize:size.slice(),retained:true};
       paintFragment(world,mesh,facadeAppearance(world,entry,'slab'));
       mesh.position=origin.add(local);
       world.rubble.push(mesh);staticParts++;

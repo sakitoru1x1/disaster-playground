@@ -369,8 +369,45 @@ async function createGame(){
           origins.add(mesh.metadata.rubbleAppearance.buildingId);
         if(mesh.metadata?.settled)settled++;
       }
+      // Check whether broad slab surfaces still resemble the source building,
+      // rather than generic grey concrete, across all fracture generations.
+      const slabs=rubble.filter(m=>m.metadata?.kind==='slab'&&
+        m.metadata?.rubbleAppearance&&m.getVerticesData('color'));
+      let customSlabs=0,paintedTopSamples=0,sourceDistance=0,concreteDistance=0;
+      let paintedRimSamples=0,rimDistanceToPaint=0,rimDistanceToConcrete=0;
+      let paintedUndersideSamples=0,undersideDistanceToPaint=0,undersideDistanceToConcrete=0;
+      const slabOrigins=new Set(),slabGenerations=[0,0,0];
+      for(const slab of slabs){
+        const meta=slab.metadata,regions=meta.slabRegions||[];
+        if(regions.length)customSlabs++;
+        slabOrigins.add(meta.rubbleAppearance.buildingId);
+        const gen=Math.min(2,Math.max(0,meta.secondaryGeneration||0));slabGenerations[gen]++;
+        const col=slab.getVerticesData('color'),paint=meta.rubbleAppearance.paint,
+          raw=meta.rubbleAppearance.concrete;
+        for(let j=0;j<regions.length;j++){
+          if(regions[j]!==1&&regions[j]!==7&&regions[j]!==4)continue;
+          const k=j*4;
+          const distancePaint=Math.hypot(col[k]-paint[0],col[k+1]-paint[1],col[k+2]-paint[2]);
+          const distanceConcrete=Math.hypot(col[k]-raw[0],col[k+1]-raw[1],col[k+2]-raw[2]);
+          if(regions[j]===1){paintedTopSamples++;sourceDistance+=distancePaint;concreteDistance+=distanceConcrete}
+          else if(regions[j]===7){
+            paintedRimSamples++;rimDistanceToPaint+=distancePaint;rimDistanceToConcrete+=distanceConcrete;
+          }else{
+            paintedUndersideSamples++;undersideDistanceToPaint+=distancePaint;
+            undersideDistanceToConcrete+=distanceConcrete;
+          }
+        }
+      }
       return {total:rubble.length,painted,paintedPercent:rubble.length?Math.round(painted*100/rubble.length):0,
         pigments:pigments.size,buildingColors:origins.size,settled,
+        slabs:slabs.length,customSlabs,slabSourceBuildings:slabOrigins.size,slabGenerations,
+        paintedTopSamples,paintedRimSamples,paintedUndersideSamples,
+        averageSlabUndersideDistanceToPaint:paintedUndersideSamples?+(undersideDistanceToPaint/paintedUndersideSamples).toFixed(3):null,
+        averageSlabUndersideDistanceToConcrete:paintedUndersideSamples?+(undersideDistanceToConcrete/paintedUndersideSamples).toFixed(3):null,
+        averageSlabRimDistanceToPaint:paintedRimSamples?+(rimDistanceToPaint/paintedRimSamples).toFixed(3):null,
+        averageSlabRimDistanceToConcrete:paintedRimSamples?+(rimDistanceToConcrete/paintedRimSamples).toFixed(3):null,
+        averageSlabTopDistanceToPaint:paintedTopSamples?+(sourceDistance/paintedTopSamples).toFixed(3):null,
+        averageSlabTopDistanceToConcrete:paintedTopSamples?+(concreteDistance/paintedTopSamples).toFixed(3):null,
         groundedFracturePieces:world.groundedFracturePieces,
         groundContactFractures:world.groundContactFractures,
         recentlySettled:world.rubble.filter(x=>!x.isDisposed()&&x.metadata?.secondaryGeneration>=1).slice(-280).map(m=>({

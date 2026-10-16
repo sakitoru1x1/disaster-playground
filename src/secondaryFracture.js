@@ -1,6 +1,7 @@
 import {MeshBuilder,VertexBuffer,VertexData,Vector3,PhysicsAggregate,PhysicsShapeType} from '@babylonjs/core';
 import {partitionSlab} from './slabs.js';
 import {paintFragment} from './rubbleAppearance.js';
+import {createBrokenSlab} from './slabMesh.js';
 
 const V=(x,y,z)=>new Vector3(x,y,z);
 const rand=(a,b)=>a+(b-a)*Math.random();
@@ -38,7 +39,8 @@ export function queueSecondaryFracture(world,fragment,contact=null,landing=false
   world.secondaryQueuePeak=Math.max(world.secondaryQueuePeak,world.pendingSecondary.length);
 }
 
-function shardMesh(world,size,material){
+function shardMesh(world,size,material,kind){
+  if(kind==='slab')return createBrokenSlab(world.scene,size,'impact broken slab piece');
   const mesh=MeshBuilder.CreateBox('impact fracture piece',{width:size[0],height:size[1],depth:size[2]},world.scene);
   const positions=mesh.getVerticesData(VertexBuffer.PositionKind),offsets=new Map();
   for(let i=0;i<positions.length;i+=3){
@@ -63,8 +65,8 @@ function piecesFrom(world,part,geometry,count,velocity,angular,dynamic,grounded=
   for(const rect of rectangles){
     const local=[0,0,0];local[a]=rect.x;local[b]=rect.z;
     const next=size.slice();next[a]=Math.max(.14,rect.w-.04);next[b]=Math.max(.14,rect.d-.04);
-    const shard=shardMesh(world,next,mesh.material);
-    shard.metadata={kind:part.kind,fragmentSize:next.slice()};
+    const shard=shardMesh(world,next,mesh.material,part.kind);
+    shard.metadata={...shard.metadata,kind:part.kind,fragmentSize:next.slice()};
     paintFragment(world,shard,mesh.metadata?.rubbleAppearance,level+1);
     shard.position=Vector3.TransformCoordinates(V(...local),matrix);
     shard.rotation.copyFrom(mesh.rotation);
