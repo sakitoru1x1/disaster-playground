@@ -1,0 +1,33 @@
+# Dependencies and compiled assets
+node_modules/
+dist/
+.vite/
+
+# Private configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Editor and platform files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Artifacts from browser tests
+*.png
+*.jpg
+*.jpeg
+*.webp
+playwright-report/
+test-results/
+*.log
+
+# Historical iterations and backups
+*.bak
+*.tmp
+*.old
