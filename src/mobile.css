@@ -155,3 +155,30 @@
   .bottom-controls button{min-width:58px;padding:5px}
   .mobile-tool small{font-size:6px}
 }
+/* One-tap immersive play. CSS 100dvh/safe-area also follows fullscreen changes. */
+.mobile-fullscreen-toggle{display:none!important}
+@media (max-width:1200px) and (max-height:660px) and (orientation:landscape),
+       (pointer:coarse) and (orientation:landscape) and (max-height:850px),
+       (max-width:600px) and (orientation:portrait){
+  .top-actions .mobile-fullscreen-toggle{display:grid!important}
+  .top-actions .mobile-fullscreen-toggle[aria-pressed="true"]{
+    color:#ffcf94!important;border-color:#f3bc83;background:#e9ad6c22
+  }
+  html:fullscreen,html:-webkit-full-screen{width:100%;height:100%;overflow:hidden;background:#07121e}
+  html:fullscreen body,html:-webkit-full-screen body{height:100%;margin:0;overflow:hidden}
+  html:fullscreen #app,html:fullscreen #renderCanvas,
+  html:-webkit-full-screen #app,html:-webkit-full-screen #renderCanvas{
+    height:100%;height:100dvh;width:100%
+  }
+}
+@media (max-width:600px) and (orientation:portrait){
+  .topbar #cameraBtn{display:none!important}
+  .topbar .brand-icon{display:none}
+  .topbar .brand-name{font-size:10px;max-width:136px;overflow:hidden;text-overflow:ellipsis;letter-spacing:0}
+  .topbar .top-actions{gap:3px}
+}
+@media (max-width:370px) and (orientation:portrait){
+  .topbar .brand-name{max-width:112px}
+  .top-actions .icon-action,.top-actions .icon-action:not(.round),
+  .top-actions .icon-action.round{min-width:34px;width:34px;height:34px;min-height:34px;padding:0}
+}

@@ -337,6 +337,42 @@ async function createGame(){
     reset:()=>createGame()
   };
 }
+function syncFullscreenUI(){
+  const active=!!(document.fullscreenElement||document.webkitFullscreenElement);
+  const button=$('#fullscreenBtn');
+  button.setAttribute('aria-pressed',String(active));
+  button.firstChild.textContent=active?'⇱ ':'⛶ ';
+  button.setAttribute('aria-label',active?'Exit fullscreen':'Enter fullscreen');
+  button.title=active?'Exit fullscreen':'Fullscreen';
+  // Fullscreen can change the CSS viewport and the canvas backing resolution.
+  requestAnimationFrame(()=>engine.resize());
+  setTimeout(()=>engine.resize(),160);
+}
+async function toggleFullscreen(){
+  const element=document.documentElement;
+  const active=!!(document.fullscreenElement||document.webkitFullscreenElement);
+  try{
+    if(active){
+      if(document.exitFullscreen)await document.exitFullscreen();
+      else if(document.webkitExitFullscreen)await document.webkitExitFullscreen();
+    }else{
+      // Must run directly as a result of a real tap; browsers reject automatic fullscreen.
+      if(element.requestFullscreen)await element.requestFullscreen({navigationUI:'hide'});
+      else if(element.webkitRequestFullscreen)await element.webkitRequestFullscreen();
+      else throw new Error('Fullscreen API unavailable');
+      // Landscape is best for this game; orientation lock is optional on browsers.
+      if(mobileDevice&&screen.orientation?.lock){
+        try{await screen.orientation.lock('landscape')}catch{ /* platform restriction */ }
+      }
+    }
+  }catch(error){
+    console.warn('Fullscreen not supported in this browser',error);
+    toast('FULLSCREEN UNAVAILABLE',
+      'On iPhone: Share → Add to Home Screen, then open the game icon.');
+  }finally{
+    syncFullscreenUI();
+  }
+}
 function bindUI(){
   $$('.tool').forEach(t=>t.addEventListener('click',()=>selectTool(t.dataset.tool)));
   $$('.mobile-tool').forEach(t=>t.addEventListener('click',()=>selectTool(t.dataset.mobileTool)));
@@ -353,6 +389,9 @@ function bindUI(){
   $('#cameraBtn').addEventListener('click',cycleCamera);
   $('#resetBtn').addEventListener('click',()=>createGame());
   $('#settingsBtn').addEventListener('click',switchQuality);
+  $('#fullscreenBtn').addEventListener('click',toggleFullscreen);
+  document.addEventListener('fullscreenchange',syncFullscreenUI);
+  document.addEventListener('webkitfullscreenchange',syncFullscreenUI);
   $('#soundBtn').addEventListener('click',()=>{
     soundsOn=!soundsOn;if(disasters)disasters.audioEnabled=soundsOn;
     $('#soundBtn span').textContent=soundsOn?'SOUND ON':'MUTED';
@@ -390,6 +429,8 @@ function bindUI(){
     else if(e.key==='Escape'){$('#helpModal').classList.add('hidden');setMobileMenu(false)}
   });
   window.addEventListener('resize',()=>{engine.resize();if(!compactLayout())setMobileMenu(false)});
+  window.addEventListener('orientationchange',()=>setTimeout(()=>engine.resize(),240));
+  syncFullscreenUI();
 }
 bindUI();
 engine.runRenderLoop(()=>{
