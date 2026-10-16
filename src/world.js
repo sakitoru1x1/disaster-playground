@@ -6,6 +6,9 @@ import {
 } from '@babylonjs/core';
 import {fractureStorey} from './fracture.js';
 import {splitOnCollision} from './secondaryFracture.js';
+import {planCity} from './cityLayout.js';
+import {sectionResistance,meteorDirectDamage,meteorBlastDamage,tornadoDamagePerSecond} from './structuralDamage.js';
+import {meteorHitDistribution,meteorScale} from './meteorBalance.js';
 
 const rand=(a,b)=>a+Math.random()*(b-a);
 const choice=a=>a[Math.floor(Math.random()*a.length)];
@@ -14,16 +17,20 @@ const V=(x,y,z)=>new Vector3(x,y,z);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 
 export class CityWorld {
-  constructor(scene,camera){
+  constructor(scene,camera,buildingCount=22){
     this.scene=scene; this.camera=camera;
+    this.buildingCount=Math.max(1,Math.min(30,Math.round(buildingCount)));
     this.structures=[];this.buildings=[];this.props=[];this.trees=[];this.debris=[];
     this.fragments=[];this.rubble=[];this.pendingFailures=[];this.slabFractures=[];this.maxFragmentBodies=260;
     this.maxPrimaryFragmentBodies=175;this.pendingSecondary=[];this.secondaryBreaks=0;
-    this.secondaryPieces=0;this.secondaryImpactEvents=0;this.maxSecondaryBreaks=200;
+    this.secondaryPieces=0;this.secondaryWallBreaks=0;this.secondaryImpactEvents=0;this.maxSecondaryBreaks=200;
+    this.secondaryWallVisualWindow=0;this.maxWallVisualPerWindow=14;
     this.maxSecondaryPerWindow=16;this.secondaryWindowCount=0;this.secondaryWindowStart=0;
-    this.visualFragments=[];this.maxVisualFragments=580;this.visualDropped=0;
+    this.visualFragments=[];this.maxVisualFragments=290;this.visualDropped=0;
+    this.massBlastActive=false;this.massBlastMarks=0;
     this.particles=[];this.scars=[];this.impactCount=0;this.totalFloors=0;this.brokenFloors=0;
     this.activeBodies=0;this.time=0;this.maxDebris=110;
+    this.windLifted=0;this.windEjected=0;this.windCarsLifted=new Set();this.kineticImpacts=0;
     this.materials={};this.shadow=null;this.glow=null;
     this.init();
   }
@@ -72,6 +79,36 @@ export class CityWorld {
     this.makeTerrain();
     this.makeDistricts();
     this.makeProps();
+    this.optimizeStaticGeometry();
+  }
+
+  // Roads, lane markings and other decorative static objects do not need
+  // independent draw calls. Merge meshes by material; never touch Havok bodies,
+  // dynamic floors, the ground collision mesh or vegetation.
+  optimizeStaticGeometry(){
+    const names=new Set(['north south avenue','east west avenue','avenue edge',
+      'dashed lane','city block','street lamp','lamp head','lamp arm',
+      'perimeter edge','marina pier','island distant rock']);
+    const groups=new Map();
+    for(const mesh of this.scene.meshes){
+      if(!names.has(mesh.name)||mesh.parent||!mesh.material||mesh.physicsBody)continue;
+      const key=mesh.material.uniqueId;
+      if(!groups.has(key))groups.set(key,[]);
+      groups.get(key).push(mesh);
+    }
+    this.staticBatchStats={sourceMeshes:0,mergedMeshes:0};
+    for(const group of groups.values()){
+      if(group.length<2)continue;
+      try{
+        const merged=Mesh.MergeMeshes(group,true,true,undefined,false,false);
+        if(!merged)continue;
+        merged.name='batched static city geometry';
+        merged.isPickable=false;merged.receiveShadows=true;
+        merged.freezeWorldMatrix();
+        this.staticBatchStats.sourceMeshes+=group.length;
+        this.staticBatchStats.mergedMeshes++;
+      }catch(e){console.warn('Static batching skipped',e)}
+    }
   }
 
   makeMaterials(){
@@ -160,7 +197,7 @@ export class CityWorld {
         const side=a<2?-1:1,axis=a%2===0;
         if((i===2&&j===2))continue;
         const px=x+(axis?side*8.3:0),pz=z+(!axis?side*8.3:0);
-        if(Math.random()<.75)this.createTree(px+rand(-.5,.5),pz+rand(-.5,.5),.6);
+        if(Math.random()<.75*Math.min(1,.12+this.buildingCount/26))this.createTree(px+rand(-.5,.5),pz+rand(-.5,.5),.6);
       }
     }
     for(let k=0;k<13;k++){
@@ -195,11 +232,10 @@ export class CityWorld {
     this.windowMat=this.makeWindowTexture();
     this.windowMaster=MeshBuilder.CreatePlane('window geometry source',{size:1,sideOrientation:Mesh.DOUBLESIDE},this.scene);
     this.windowMaster.material=this.windowMat;this.windowMaster.isVisible=false;this.windowMaster.isPickable=false;
-    const coords=[-52,-26,0,26,52];
-    for(let i=0;i<5;i++)for(let j=0;j<5;j++){
-      if((i===1&&j===3)||(i===3&&j===1)||(i===2&&j===2))continue;
-      const x=coords[i],z=coords[j];
-      this.makeBuilding(x,z,i,j);
+    for(const plot of planCity(this.buildingCount)){
+      for(const site of plot.buildings){
+        this.makeBuilding(site.x,site.z,plot.i,plot.j,site.size);
+      }
     }
     // Tiny harbor installations.
     for(let i=0;i<5;i++){
@@ -207,11 +243,13 @@ export class CityWorld {
     }
   }
 
-  makeBuilding(x,z,i,j){
+  makeBuilding(x,z,i,j,siteSize=11){
     const index=this.buildings.length;
     const style=Math.floor(rand(0,7)),modern=Math.random()>.55;
     const floors=Math.floor(rand(3,8))+((i===2||j===2)?1:0);
-    const width=rand(9.7,12.5),depth=rand(9,12.4),fh=3.6,offsX=rand(-1,1),offsZ=rand(-1,1);
+    const width=siteSize*rand(.91,1.03),depth=siteSize*rand(.88,1.03),fh=3.6;
+    const offsX=siteSize>=10?rand(-.45,.45):rand(-.13,.13);
+    const offsZ=siteSize>=10?rand(-.45,.45):rand(-.13,.13);
     const b={id:index,x,z,style,name:choice(['Harbor','Sunset','North','Pacific','Crescent','Beacon','Meridian','Atlas','Orion'])+' '+(index+1),floors:[],destroyed:false};
     this.buildings.push(b);
     for(let n=0;n<floors;n++){
@@ -241,7 +279,10 @@ export class CityWorld {
           this.box('rooftop unit',[2.5,1.3,2],V(0,fh*.5+.7,0),this.materials.trim,mesh);
         }
       }
-      const entry={mesh,aggregate:null,building:b,storey:n,active:false,size:V(w,fh-.16,d),health:1};
+      const maxHealth=sectionResistance(n,floors);
+      const entry={mesh,aggregate:null,building:b,storey:n,active:false,size:V(w,fh-.16,d),
+        materialClass:isTop?'roof':n===0?'foundation':'concrete frame',
+        maxHealth,health:maxHealth,damageTaken:0,damageMarks:0};
       entry.aggregate=new PhysicsAggregate(mesh,PhysicsShapeType.BOX,{mass:0,friction:.84,restitution:.08},this.scene);
       b.floors.push(entry);this.structures.push(entry);this.totalFloors++;
     }
@@ -267,7 +308,7 @@ export class CityWorld {
 
   makeProps(){
     const m=this.materials;
-    for(let i=0;i<21;i++){
+    for(let i=0;i<Math.min(21,Math.max(2,Math.round(this.buildingCount*.65)));i++){
       const x=choice([-39,-13,13,39])+rand(-1,1),z=rand(-70,70);
       const car=this.box('parked vehicle',[3.65,1.15,1.8],V(x,1,z),choice(m.chassis),null,true);
       const cabin=this.box('vehicle windows',[1.8,.75,1.55],V(-.15,.72,0),m.carDark,car);
@@ -279,7 +320,7 @@ export class CityWorld {
       a.body.setLinearDamping(.45);a.body.setAngularDamping(.5);
       this.props.push({mesh:car,aggregate:a,type:'car',active:true});
     }
-    for(let i=0;i<26;i++){
+    for(let i=0;i<Math.min(26,Math.max(6,Math.round(this.buildingCount*.95)));i++){
       const x=choice([-39,-13,13,39])+choice([-4.8,4.8]);
       const z=rand(-77,77);
       const pole=this.cylinder('street lamp',.13,5.6,V(x,3,z),m.dark,7);
@@ -339,6 +380,49 @@ export class CityWorld {
     return group.reduce((best,e)=>Math.abs(e.mesh.position.y-targetY)<Math.abs(best.mesh.position.y-targetY)?e:best,group[0]);
   }
 
+  // Adds visible cracks and physical chips without removing the load-bearing
+  // section. Damage never makes an intact storey fall until resistance is gone.
+  damageStructure(entry,amount,impulse=V(0,0,0),impactAt=null,source='impact'){
+    if(!entry||entry.active||amount<=0)return false;
+    entry.health=Math.max(0,entry.health-amount);
+    entry.damageTaken+=amount;
+    const ratio=entry.health/entry.maxHealth;
+    const markThresholds=[.76,.46,.20];
+    const markAt=markThresholds[entry.damageMarks]??-1;
+    if(ratio<=markAt&&entry.damageMarks<3){
+      entry.damageMarks++;
+      const drawMark=source!=='blast'||this.massBlastMarks<28;
+      if(source==='blast')this.massBlastMarks++;
+      if(drawMark){
+      const center=entry.mesh.getAbsolutePosition(),size=entry.size;
+      const roof=entry.storey===entry.building.floors.length-1&&
+        (source==='meteor'||source==='blast');
+      let points;
+      if(roof){
+        const px=impactAt?Math.max(-size.x*.35,Math.min(size.x*.35,impactAt.x-center.x)):0;
+        const pz=impactAt?Math.max(-size.z*.35,Math.min(size.z*.35,impactAt.z-center.z)):0;
+        const x=center.x+px,z=center.z+pz,y=center.y+size.y*.5+.30;
+        points=[V(x-1.25,y,z-.65),V(x-.55,y,z+.08),V(x+.28,y,z-.37),V(x+1.36,y,z+.48)];
+      }else{
+        const x=center.x+size.x*.5+.065,z=center.z,y=center.y;
+        points=[V(x,y-1.15,z-.98),V(x,y-.39,z-.12),V(x,y+.30,z-.51),V(x,y+1.05,z+.85)];
+      }
+      const crack=MeshBuilder.CreateLines('structural stress crack',{points},this.scene);
+      crack.color=Color3.FromHexString('#20232b');crack.isPickable=false;
+      this.createBurst(points[1],'dust',Math.round(7+9*amount/entry.maxHealth),.18);
+      if(source==='meteor'||source==='blast'){
+        const hit=impactAt||center;
+        // Small physical chips leave the facade even if the frame survives.
+        this.tossDebris(hit,Math.min(3,Math.max(1,Math.floor(amount/25))),.22);
+      }
+      }
+    }
+    if(entry.health>0)return false;
+    const released=this.release(entry,impulse,impactAt);
+    if(!released)entry.health=.1; // collider remains intact if physics budget fills.
+    return released;
+  }
+
   release(entry,impulse=V(0,0,0),impactAt=null){
     if(entry.active)return false;
     if(!fractureStorey(this,entry,impulse,impactAt))return false;
@@ -352,7 +436,7 @@ export class CityWorld {
     return true;
   }
 
-  fractureAt(center,radius,strength=1,mode='blast'){
+  fractureAt(center,radius,strength=1,mode='blast',maxSections=Infinity){
     let cracked=0;
     const affected=[];
     for(const entry of this.structures){
@@ -363,18 +447,26 @@ export class CityWorld {
       const dist=Math.hypot(dx,dz,(pos.y-center.y)*.32);
       if(dist>radius)continue;
       const falloff=Math.pow(Math.max(0,1-dist/radius),1.1);
-      const likelihood=(mode==='quake'? .15:.40)+falloff*1.15*strength;
-      const stable=entry.storey===0?.8:1;
-      if(Math.random()>likelihood*stable)continue;
+      if(mode!=='blast'&&mode!=='kinetic'){
+        const likelihood=(mode==='quake'? .15:.40)+falloff*1.15*strength;
+        const stable=entry.storey===0?.8:1;
+        if(Math.random()>likelihood*stable)continue;
+      }
       affected.push({entry,falloff,dx,dz});
     }
-    for(const {entry,falloff,dx,dz} of affected){
+    // A shockwave breaks closest sections first and distributes the workload
+    // over subsequent cascading collapses; prevents a 1-frame Havok freeze.
+    affected.sort((a,b)=>b.falloff-a.falloff);
+    for(const {entry,falloff,dx,dz} of affected.slice(0,maxSections)){
       const dist=Math.hypot(dx,dz)||1;
       let force=V(dx/dist*(10+34*falloff*strength),rand(6,19)*strength,dz/dist*(10+34*falloff*strength));
       if(mode==='quake')force=V(rand(-26,26)*strength,rand(7,13)*strength,rand(-26,26)*strength);
       if(mode==='tornado')force=V(-dz/dist*(15+25*strength),15+30*strength,dx/dist*(15+25*strength));
       if(mode==='water')force=V((13+32*strength),3+strength*10,rand(-7,7));
-      if(this.release(entry,force))cracked++;
+      if(mode==='blast'||mode==='kinetic'){
+        const damage=meteorBlastDamage(strength,falloff)*(mode==='kinetic'?.32:1);
+        if(this.damageStructure(entry,damage,force,center,mode))cracked++;
+      }else if(this.release(entry,force))cracked++;
     }
     for(const prop of this.props){
       const p=prop.mesh.position,dx=p.x-center.x,dz=p.z-center.z,dist=Math.hypot(dx,dz);
@@ -384,6 +476,48 @@ export class CityWorld {
       }
     }
     return cracked;
+  }
+
+  // Physical damage from the projectile itself, BEFORE the delayed explosion.
+  kineticMeteorImpact(point,direction,strength,entry=null){
+    this.kineticImpacts++;
+    let damage=0;
+    if(entry){
+      const floors=entry.building.floors;
+      const targets=[entry,floors[entry.storey-1],floors[entry.storey+1]].filter(Boolean);
+      const energies=meteorHitDistribution(strength),scale=meteorScale(strength);
+      for(let i=0;i<targets.length;i++){
+        const e=targets[i];if(e.active)continue;
+        const center=e.mesh.getAbsolutePosition();
+        const radial=center.subtract(point);
+        const dir=radial.lengthSquared()>.0001?radial.normalize():direction;
+        const impulse=direction.scale(scale.impulse*(1+i*.2))
+          .add(dir.scale(16+scale.impulse*.65)).add(V(0,4+18*strength,0));
+        const energy=energies[i];
+        if(this.damageStructure(e,energy,impulse,point,'meteor'))damage++;
+      }
+      // Loose chips on impact; strength determines how much material is ejected.
+      this.tossDebris(point,Math.round(1+6*Math.sqrt(strength)),.2+.8*strength);
+    }else{
+      // Ground/asphalt contact produces real physical chunks and a crater.
+      const asphalt=[-39,-13,13,39].some(v=>Math.abs(point.x-v)<4||Math.abs(point.z-v)<4);
+      const material=asphalt?this.materials.road:this.materials.soil;
+      const count=Math.round(6+8*strength);
+      for(let n=0;n<count&&this.debris.length<this.maxDebris;n++){
+        const side=rand(.38,1.7),p=point.add(V(rand(-2,2),rand(.3,1.4),rand(-2,2)));
+        const mesh=this.box('impact displaced asphalt',[side,rand(.16,.43),side*rand(.7,1.3)],p,material);
+        const aggregate=new PhysicsAggregate(mesh,PhysicsShapeType.BOX,{mass:rand(1,5),friction:.8,restitution:.12},this.scene);
+        const lateral=V(rand(-1,1),rand(.22,1.1),rand(-1,1)).normalize().scale(rand(9,27)*strength);
+        aggregate.body.applyImpulse(lateral.add(direction.scale(rand(3,10)*strength)),p);
+        aggregate.body.setAngularVelocity(V(rand(-6,6),rand(-6,6),rand(-6,6)));
+        this.debris.push({mesh,aggregate,time:0});this.activeBodies++;damage++;
+      }
+      this.scorch(point,2.4+2.5*strength,false);
+      // Mechanical shock can damage only structures immediately beside impact.
+      // Ground impact is represented by displaced asphalt; broad structural
+      // damage comes only from the spatially propagated blast wave.
+    }
+    return damage;
   }
 
   tossDebris(center,count=18,strength=1){
@@ -449,7 +583,10 @@ export class CityWorld {
   update(dt){
     this.time+=dt;
     // Renew the secondary fracture budget periodically, so later disasters work too.
-    if(this.time-this.secondaryWindowStart>10){this.secondaryWindowStart=this.time;this.secondaryWindowCount=0}
+    if(this.time-this.secondaryWindowStart>10){
+      this.secondaryWindowStart=this.time;this.secondaryWindowCount=0;
+      this.secondaryWallVisualWindow=0;
+    }
     // Process contact impulses after Havok has completed its physics step.
     const batch=this.pendingSecondary.splice(0,5);
     for(const contact of batch){
@@ -507,9 +644,29 @@ export class CityWorld {
       this.rubble.push(fragment.mesh);
       this.fragments.splice(i,1);this.activeBodies=Math.max(0,this.activeBodies-1);
     }
-    for(const body of this.debris){
+    // Turn debris that has already settled into persistent visual rubble;
+    // remove its Havok collider to avoid accumulating hundreds of bodies.
+    for(let i=this.debris.length-1;i>=0;i--){
+      const body=this.debris[i];
       body.time+=dt;
-      if(body.mesh.position.y< -60)body.mesh.setEnabled(false);
+      const p=body.mesh.position;
+      if(p.y< -50){
+        body.aggregate?.dispose();
+        body.mesh.dispose();
+        this.debris.splice(i,1);
+        this.activeBodies=Math.max(0,this.activeBodies-1);
+        continue;
+      }
+      if(body.time>6&&p.y<3.2){
+        const v=body.aggregate.body.getLinearVelocity();
+        if(v.lengthSquared()<2||body.time>20){
+          body.aggregate.dispose();
+          body.mesh.metadata={...(body.mesh.metadata||{}),settled:true,kind:'rubble'};
+          this.rubble.push(body.mesh);
+          this.debris.splice(i,1);
+          this.activeBodies=Math.max(0,this.activeBodies-1);
+        }
+      }
     }
     if(this.sea){
       this.sea.position.y=-3.25+Math.sin(this.time*.85)*.06;

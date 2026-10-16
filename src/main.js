@@ -13,12 +13,13 @@ const $=selector=>document.querySelector(selector);
 const $$=selector=>[...document.querySelectorAll(selector)];
 const canvas=$('#renderCanvas');
 const engine=new Engine(canvas,true,{stencil:true,preserveDrawingBuffer:false,alpha:false,antialias:true,powerPreference:'high-performance'});
-engine.setHardwareScalingLevel(Math.max(1,window.devicePixelRatio*0.85));
+engine.setHardwareScalingLevel(Math.max(1.55,window.devicePixelRatio*1.15));
 let scene,camera,world,disasters,pipeline;
 let havoc=null;
 let selected='meteor',power=.75,paused=false,speed=1;
+let buildingCount=22;
 let simTime=0,lastTick=performance.now(),fpsTimer=0;
-let rebuilding=false,soundsOn=true,qualityHigh=true,cinematic=false;
+let rebuilding=false,soundsOn=true,qualityHigh=false,cinematic=false;
 let physicsViewer=null;
 let pointerStart=null,targetPoint=null,hovered=false;
 let cameraAngles=[[-Math.PI*.67,1.05,165],[-Math.PI*.52,.66,135],[-Math.PI*.15,1.24,105]];
@@ -48,6 +49,10 @@ function logEvent(title,detail){
 function setStatus(text,sub='Ready to deploy'){$('#statusText').textContent=text;$('#statusSub').textContent=sub;}
 function selectTool(type){
   selected=type;
+  const intensity=$('#power');
+  intensity.min=type==='meteor'?'1':'15';
+  if(type!=='meteor'&&Number(intensity.value)<15)intensity.value='15';
+  updatePower();
   $$('.tool').forEach(el=>el.classList.toggle('is-active',el.dataset.tool===type));
   $('#targetCursor b').textContent=labels[type]+' TARGET';
   setStatus(labels[type]+' SELECTED','Click a location to deploy');
@@ -56,9 +61,26 @@ function updatePower(){
   power=parseInt($('#power').value,10)/100;
   const pct=Math.round(power*100);
   $('#powerValue').textContent=pct+'%';
-  $('#rangeFill').style.width=((pct-15)/85*100)+'%';
+  const minimum=selected==='meteor'?1:15;
+  $('#rangeFill').style.width=((pct-minimum)/(100-minimum)*100)+'%';
   $('#powerLevel').textContent=two(Math.max(1,Math.ceil(power*5)));
-  $('#powerDescription').textContent=pct>=85?'CATASTROPHIC':pct>=60?'SEVERE DAMAGE':pct>=35?'MODERATE DAMAGE':'LIGHT DAMAGE';
+  $('#powerDescription').textContent=selected==='meteor'?
+    (pct>=85?'CITYWIDE DISASTER':pct>=60?'DISTRICT DESTRUCTION':pct>=30?'BUILDING DESTRUCTION':pct>=10?'HEAVY LOCAL IMPACT':'LOCAL PENETRATION'):
+    (pct>=85?'CATASTROPHIC':pct>=60?'SEVERE DAMAGE':pct>=35?'MODERATE DAMAGE':'LIGHT DAMAGE');
+}
+function updateBuildingsLabel(){
+  const el=$('#housesCount');if(!el)return;
+  const count=Math.max(1,Math.min(30,Number(el.value)||22));
+  $('#housesValue').textContent=count+' / 30';
+  $('#housesRangeFill').style.width=((count-1)/29*100)+'%';
+}
+async function changeBuildingCount(count){
+  const value=Math.max(1,Math.min(30,Math.round(Number(count)||1)));
+  buildingCount=value;$('#housesCount').value=String(value);
+  updateBuildingsLabel();
+  if(rebuilding)return;
+  toast('CITY DENSITY: '+value+' BUILDING'+(value===1?'':'S'),'Regenerating physics world');
+  await createGame();
 }
 function updateStats(dt){
   if(!world||!scene)return;
@@ -150,12 +172,32 @@ function cycleCamera(){
   camera.alpha=a;camera.beta=b;camera.radius=r;
   toast(['ISOMETRIC VIEW','HIGH-ALTITUDE VIEW','CLOSE-UP VIEW'][cameraIndex]);
 }
+function applyQuality(){
+  engine.setHardwareScalingLevel(qualityHigh?Math.max(1,window.devicePixelRatio*.85):Math.max(1.55,window.devicePixelRatio*1.15));
+  if(pipeline){
+    pipeline.bloomEnabled=qualityHigh;
+    pipeline.fxaaEnabled=qualityHigh;
+    pipeline.samples=qualityHigh?2:1;
+  }
+  if(world?.sun)world.sun.shadowEnabled=qualityHigh;
+  if(scene)scene.fogMode=qualityHigh?scene.FOGMODE_EXP2:scene.FOGMODE_NONE;
+  if(world?.shadow){
+    world.shadow.setDarkness(qualityHigh?.18:.24);
+    world.shadow.filteringQuality=qualityHigh?ShadowGenerator.QUALITY_MEDIUM:ShadowGenerator.QUALITY_LOW;
+  }
+  if(world){
+    // PERF keeps visual rubble but significantly limits simultaneously ACTIVE
+    // Havok bodies. Loose chunks may be reactivated by a tornado later.
+    world.maxFragmentBodies=qualityHigh?260:155;
+    world.maxPrimaryFragmentBodies=qualityHigh?175:112;
+    world.maxDebris=qualityHigh?110:46;
+    world.maxSecondaryPerWindow=qualityHigh?16:9;
+  }
+  $('#settingsBtn span').textContent=qualityHigh?'ULTRA':'PERF';
+}
 function switchQuality(){
   qualityHigh=!qualityHigh;
-  engine.setHardwareScalingLevel(qualityHigh?Math.max(1,window.devicePixelRatio*.85):Math.max(1.35,window.devicePixelRatio*1.15));
-  if(pipeline){pipeline.bloomEnabled=qualityHigh;pipeline.fxaaEnabled=qualityHigh;pipeline.samples=qualityHigh?2:1}
-  if(world?.shadow){world.shadow.setDarkness(qualityHigh?.18:.30);world.shadow.filteringQuality=qualityHigh?ShadowGenerator.QUALITY_MEDIUM:ShadowGenerator.QUALITY_LOW;}
-  $('#settingsBtn span').textContent=qualityHigh?'ULTRA':'PERF';
+  applyQuality();
   toast(qualityHigh?'ULTRA QUALITY':'PERFORMANCE MODE');
 }
 function togglePhysicsViewer(){
@@ -196,7 +238,7 @@ async function createGame(){
   scene.enablePhysics(new Vector3(0,-18,0),plugin);
   scene.getPhysicsEngine().setTimeStep(1/60);
   $('#loadingText').textContent='CONSTRUCTING SIMULATED CITY...';
-  world=new CityWorld(scene,camera);
+  world=new CityWorld(scene,camera,buildingCount);
   const groundPhysics=new PhysicsAggregate(world.ground,PhysicsShapeType.BOX,{mass:0,friction:.93,restitution:.06},scene);
   const islandPhysics=new PhysicsAggregate(scene.getMeshByName('island slab'),PhysicsShapeType.BOX,{mass:0,friction:.92},scene);
   world.groundPhysics=groundPhysics;world.islandPhysics=islandPhysics;
@@ -212,6 +254,7 @@ async function createGame(){
   }catch(e){console.warn('Post-processing fallback',e)}
   disasters=new DisasterSystem(world,callbacks());
   disasters.audioEnabled=soundsOn;
+  applyQuality();
   simTime=0;paused=false;speed=1;fpsTimer=0;
   $('#pauseIcon').textContent='Ⅱ';$('#pauseBtn').lastChild.textContent=' PAUSE';
   $('#speedBtn').textContent='1× SPEED';
@@ -222,22 +265,42 @@ async function createGame(){
   rebuilding=false;
   setTimeout(()=>$('#loading').classList.add('is-done'),330);
   window.disasterDebug={
-    getState:()=>({fps:engine.getFps(),buildings:world.buildings.length,floors:world.totalFloors,broken:world.brokenFloors,
+    getPerf:()=>({fps:engine.getFps(),drawCalls:engine._drawCalls?.current??null,meshes:scene.meshes.length,activeMeshes:scene.getActiveMeshes().length,activeIndices:scene.getActiveIndices(),hardwareScale:engine.getHardwareScalingLevel(),width:engine.getRenderWidth(),height:engine.getRenderHeight(),shadows:world.shadow.getShadowMap()?.getSize()?.width||0,batching:world.staticBatchStats,quality:qualityHigh?'ULTRA':'PERF'}),
+    getState:()=>({fps:engine.getFps(),buildings:world.buildings.length,requestedBuildings:buildingCount,floors:world.totalFloors,broken:world.brokenFloors,
     activeBodies:world.activeBodies,impacts:world.impactCount,integrity:world.integrity(),activeEffects:disasters.effects.length,craneJointActive:!!world.crane,fragments:world.fragments.length,shadowMapSize:world.shadow.getShadowMap()?.getSize().width,pendingFailures:world.pendingFailures.length,slabFractures:world.slabFractures.length,slabSplitCounts:world.slabFractures.slice(-30).map(s=>s.requestedParts),slabPhysicalParts:world.slabFractures.reduce((a,s)=>a+s.physicalParts,0),slabStaticParts:world.slabFractures.reduce((a,s)=>a+s.staticParts,0),
     fallingVisual:world.visualFragments.length,visibleRubble:world.rubble.length,
-    secondaryBreaks:world.secondaryBreaks,secondaryPieces:world.secondaryPieces,secondaryImpactEvents:world.secondaryImpactEvents,secondaryWindowCount:world.secondaryWindowCount,
+    secondaryBreaks:world.secondaryBreaks,secondaryWallBreaks:world.secondaryWallBreaks,
+    visualWallBreaks:world.secondaryWallVisualWindow,secondaryPieces:world.secondaryPieces,secondaryImpactEvents:world.secondaryImpactEvents,secondaryWindowCount:world.secondaryWindowCount,
     unsupportedFloors:world.structures.filter(e=>!e.active&&e.building.floors.slice(0,e.storey).some(low=>low.active)).length,
-    lastMeteorImpact:disasters.lastMeteorImpact||null,meteorsInFlight:disasters.meteors.length}),
+    damagedSections:world.structures.filter(e=>!e.active&&e.health<e.maxHealth).length,
+    damagePercent:Math.round(world.structures.reduce((sum,e)=>sum+(e.active?1:1-e.health/e.maxHealth),0)/world.structures.length*100),
+    sectionHealth:world.structures.map(e=>({buildingId:e.building.id,storey:e.storey,
+      health:Math.round(e.health),maxHealth:e.maxHealth,broken:e.active,damageMarks:e.damageMarks})),
+    lastMeteorImpact:disasters.lastMeteorImpact||null,meteorsInFlight:disasters.meteors.length,
+    meteorPhases:disasters.meteors.map(m=>({phase:m.phase,impactAge:m.impactAge,delay:m.explosionDelay})),
+    meteorHistory:disasters.meteorHistory.slice(-8),meteorEvents:disasters.meteorEvents.slice(-18),kineticImpacts:world.kineticImpacts,
+    blastHistory:disasters.blastHistory.slice(-8),activeBlastWaves:disasters.blastWaves.length,
+    waveProgress:disasters.blastWaves.map(w=>({power:w.power,cursor:w.cursor,total:w.targets.length,broken:w.broken,age:w.age})),
+    windLifted:world.windLifted,windEjected:world.windEjected,carsAirborne:world.windCarsLifted.size,
+    carElevations:world.props.filter(p=>p.type==='car').map(p=>+p.mesh.position.y.toFixed(2)),
+    carPositions:world.props.filter(p=>p.type==='car').map(p=>({x:+p.mesh.position.x.toFixed(2),y:+p.mesh.position.y.toFixed(2),z:+p.mesh.position.z.toFixed(2)})),
+    tornadoCenters:disasters.effects.filter(e=>e.type==='tornado').map(e=>({x:e.root.position.x,z:e.root.position.z})),
+    airborneFragments:world.fragments.filter(p=>p.mesh.position.y>4).length}),
     getBuildings:()=>world.buildings.map(b=>({id:b.id,x:b.floors[0].mesh.position.x,z:b.floors[0].mesh.position.z,
       floors:b.floors.length,topY:b.floors.at(-1).mesh.position.y})),
     getPick:(x,y)=>{const p=surfacePoint(x,y);return p?{x:p.x,y:p.y,z:p.z}:null},
     deploy:(kind='meteor',x=0,z=0,p=.7)=>disasters.deploy(kind,new Vector3(x,0,z),p),
+    deployAt:(kind,x,y,z,p=.8)=>disasters.deploy(kind,new Vector3(x,y,z),p),
+    setBuildings:(count)=>changeBuildingCount(count),
     reset:()=>createGame()
   };
 }
 function bindUI(){
   $$('.tool').forEach(t=>t.addEventListener('click',()=>selectTool(t.dataset.tool)));
   $('#power').addEventListener('input',updatePower);updatePower();
+  $('#housesCount').addEventListener('input',updateBuildingsLabel);
+  $('#housesCount').addEventListener('change',e=>changeBuildingCount(e.target.value));
+  updateBuildingsLabel();
   $('#randomBtn').addEventListener('click',surprise);
   $('#pauseBtn').addEventListener('click',togglePause);
   $('#speedBtn').addEventListener('click',cycleSpeed);

@@ -9,7 +9,7 @@
   <header class="topbar">
     <div class="brand"><div class="brand-icon"><span class="brand-cross">✳</span></div><div class="brand-copy"><div class="brand-overline">A PHYSICS EXPERIMENT</div><div class="brand-name">DISASTER<span class="brand-slash"> / </span>PLAYGROUND</div></div></div>
     <div class="top-center"><span class="live-dot"></span><span>LIVE SIMULATION</span><span class="top-separator"></span><span id="clock">00:00</span></div>
-    <div class="top-actions"><button id="cameraBtn" class="icon-action" title="Switch camera (C)">◉ <span>CAMERA</span></button><button id="soundBtn" class="icon-action" title="Toggle sound">♫ <span>SOUND ON</span></button><button id="settingsBtn" class="icon-action" title="Toggle quality">⚙ <span>ULTRA</span></button><button id="helpBtn" class="icon-action round" title="Controls and help">?</button></div>
+    <div class="top-actions"><button id="cameraBtn" class="icon-action" title="Switch camera (C)">◉ <span>CAMERA</span></button><button id="soundBtn" class="icon-action" title="Toggle sound">♫ <span>SOUND ON</span></button><button id="settingsBtn" class="icon-action" title="Toggle quality">⚙ <span>PERF</span></button><button id="helpBtn" class="icon-action round" title="Controls and help">?</button></div>
   </header>
   <aside class="sidebar">
     <div class="sidebar-inner">
@@ -26,8 +26,14 @@
       </div>
       <div class="separator"></div>
       <div class="subsection-title">DISASTER INTENSITY <span id="powerValue">75%</span></div>
-      <div class="intensity-row"><span>LOW</span><div class="range-wrap"><input type="range" id="power" min="15" max="100" value="75" aria-label="Disaster intensity"/><div class="range-fill" id="rangeFill"></div></div><span>EXTREME</span></div>
+      <div class="intensity-row"><span>LOW</span><div class="range-wrap"><input type="range" id="power" min="1" max="100" value="75" aria-label="Disaster intensity"/><div class="range-fill" id="rangeFill"></div></div><span>EXTREME</span></div>
       <div class="power-label"><span id="powerDescription">SEVERE DAMAGE</span><span>LVL <span id="powerLevel">04</span></span></div>
+      <div class="separator"></div>
+      <div class="subsection-title">CITY BUILDINGS <span id="housesValue">22 / 30</span></div>
+      <div class="intensity-row"><span>1</span><div class="range-wrap">
+      <input type="range" id="housesCount" min="1" max="30" value="22" step="1" aria-label="Number of buildings"/>
+      <div class="range-fill" id="housesRangeFill"></div></div><span>30</span></div>
+      <div class="power-label"><span>FROM FOUNTAIN OUTWARD</span><span>APPLY ON RELEASE</span></div>
       <div class="tip-box"><span class="tip-icon">◎</span><p><strong>HOW TO PLAY</strong><br/>Click anywhere on the city to deploy. Drag to orbit. Scroll to zoom.</p></div>
       <button id="randomBtn" class="random-btn"><span>✦</span> SURPRISE ME <span class="random-arrow">↗</span></button>
     </div>

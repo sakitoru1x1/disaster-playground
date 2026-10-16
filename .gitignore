@@ -31,3 +31,6 @@ test-results/
 *.bak
 *.tmp
 *.old
+
+tests-temp/
+backups/

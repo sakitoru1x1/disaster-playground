@@ -71,9 +71,9 @@ function spawnPhysical(world,entry,origin,local,size,kind,face,impulse,slabId=nu
     rand(-3,3),kind==='slab'?rand(1,4):rand(2,6),rand(-3,3)));
   aggregate.body.applyImpulse(push,shard.position);
   aggregate.body.setAngularVelocity(V(rand(-1.6,1.6),rand(-2,2),rand(-1.6,1.6)));
-  const fragment={mesh:shard,aggregate,age:0,kind,slabId,building:entry.building,secondaryQueued:false,secondaryGeneration:0};
+  const fragment={mesh:shard,aggregate,age:0,kind,slabId,building:entry.building,secondaryQueued:false,secondaryGeneration:0,fallStartY:shard.position.y};
   world.fragments.push(fragment);
-  if(kind==='slab'&&size[0]*size[2]>3.2&&Math.min(size[0],size[2])>.98){
+  if((kind==='slab'||kind==='wall')&&[...size].sort((a,b)=>b-a)[0]*[...size].sort((a,b)=>b-a)[1]>3.3){
     aggregate.body.setCollisionCallbackEnabled(true);
     const observable=aggregate.body.getCollisionObservable();
     fragment.collisionObservable=observable;
@@ -112,9 +112,11 @@ export function fractureStorey(world,entry,impulse,impactAt){
 
   // Each floor plate is independently fractured into a RANDOM 2/3/5/8/10 pieces.
   // A few non-slab fragments get priority to keep the walls recognizable.
-  const selectedCount=chooseSlabSplitCount();
+  // Large meteor shockwaves use a cheaper fracture pattern to keep Havok
+  // responsive while destroying many buildings in a short time.
+  const selectedCount=world.massBlastActive?(Math.random()<.64?2:3):chooseSlabSplitCount();
   const room=Math.max(0,world.maxFragmentBodies-world.fragments.length);
-  const wallCount=Math.min(5,Math.max(0,room-selectedCount));
+  const wallCount=Math.min(world.massBlastActive?2:5,Math.max(0,room-selectedCount));
   const panels=[
     {local:V(-w*.25,0,-d*.49),size:[w*.43,h*.88,.31],face:'back'},
     {local:V(w*.25,0,-d*.49),size:[w*.43,h*.78,.31],face:'back'},

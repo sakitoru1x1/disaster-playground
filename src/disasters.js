@@ -2,6 +2,9 @@ import {
   Vector3, Color3, Color4, MeshBuilder, StandardMaterial, TransformNode,
   PhysicsAggregate, PhysicsShapeType, ParticleSystem, PointLight, Mesh
 } from '@babylonjs/core';
+import {blowBody,activateWindRubble} from './windPhysics.js';
+import {tornadoDamagePerSecond} from './structuralDamage.js';
+import {meteorPower,meteorScale,meteorWaveDamage,meteorHitDistribution} from './meteorBalance.js';
 const V=(x,y,z)=>new Vector3(x,y,z);
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(a,l,h)=>Math.max(l,Math.min(h,a));
@@ -13,13 +16,15 @@ export class DisasterSystem{
     this.world=world;this.scene=world.scene;this.events=events;
     this.effects=[];this.meteors=[];this.shocks=[];this.time=0;this.shake=0;
     this.stormCounter=0;this.lightning=0;
+    this.meteorHistory=[];this.meteorEvents=[];this.lastMeteorImpact=null;this.windEventStats={lifted:0,carsAirborne:0};
+    this.blastWaves=[];this.blastHistory=[];
     this.volume=.8;this.audioEnabled=true;this.audio=null;
   }
   get strength(){return this.lastStrength||.75}
   deploy(type,position,intensity=.75){
     const p=position.clone();
     p.x=clamp(p.x,-75,75);p.z=clamp(p.z,-75,75);
-    const strength=clamp(intensity,.15,1);
+    const strength=type==='meteor'?meteorPower(intensity):clamp(intensity,.15,1);
     this.lastStrength=strength;
     this.world.impactCount++;
     switch(type){
@@ -66,7 +71,8 @@ export class DisasterSystem{
 
   meteor(target,strength){
     const scene=this.scene,w=this.world;
-    const radius=1.7+strength*1.65;
+    // Keep low-power projectiles visible without gigantic 100% spheres.
+    const radius=1.2+2.8*Math.pow(strength,.55);
     const mesh=MeshBuilder.CreateSphere('HAVOK METEOR PROJECTILE',{diameter:radius*2,segments:14},scene);
     // Resolve the selected city object: ground clicks inside a footprint also target its facade.
     const targetStorey=w.findBuildingAt(target.x,target.z,target.y);
@@ -74,16 +80,22 @@ export class DisasterSystem{
       V(targetStorey.mesh.position.x,Math.max(6,targetStorey.mesh.position.y),targetStorey.mesh.position.z):
       V(target.x,Math.max(0,target.y),target.z);
     const flightTime=1.1;
-    const launchOffset=V(20,63,17);
+    // Open ground is approached nearly vertically so the meteor cannot hit a
+    // neighboring skyscraper on the way to the selected road.
+    // Roof targets are approached from above so the projectile drills through
+    // the roof, not off its edge. Wall targets preserve the diagonal trajectory.
+    const isRoofTarget=!!targetStorey&&targetStorey.storey===targetStorey.building.floors.length-1;
+    const launchOffset=isRoofTarget?V(0,65,0):targetStorey?V(20,63,17):V(0,66,0);
     mesh.position=aim.add(launchOffset);mesh.material=w.materials.meteor;
     mesh.isPickable=false;
     const fire=MeshBuilder.CreateSphere('meteor incandescent core',{diameter:radius*1.65,segments:10},scene);
     fire.material=this.material('molten meteor corona','#f7a44f',.56,'#ff652b');
     fire.parent=mesh;fire.isPickable=false;
-    const aggregate=new PhysicsAggregate(mesh,PhysicsShapeType.SPHERE,{mass:800+strength*900,friction:.35,restitution:.08},scene);
-    // Ballistic velocity includes compensation for Havok's downward gravity.
-    aggregate.body.setLinearVelocity(V(-launchOffset.x/flightTime,-launchOffset.y/flightTime+9*flightTime,-launchOffset.z/flightTime));
-    aggregate.body.setAngularVelocity(V(3,1.1,2));
+    // Continuous-sweep projectile: collision detection happens BEFORE Havok
+    // can resolve a hard-sphere bounce against the still-intact roof.
+    // At contact, we transfer momentum to real Havok concrete fragments.
+    const aggregate=null;
+    const velocity=V(-launchOffset.x/flightTime,-launchOffset.y/flightTime+9*flightTime,-launchOffset.z/flightTime);
     const system=new ParticleSystem('meteor burning tail',330,scene);
     system.particleTexture=w.getParticleTexture();system.emitter=mesh;
     system.minSize=.8;system.maxSize=3;
@@ -91,46 +103,165 @@ export class DisasterSystem{
     system.emitRate=350;system.minEmitPower=.7;system.maxEmitPower=3.4;
     system.color1=new Color4(1,.68,.23,.95);system.color2=new Color4(1,.19,.05,.85);
     system.colorDead=new Color4(.3,.28,.3,0);system.gravity=V(0,3,0);system.start();
-    this.meteors.push({mesh,aggregate,system,target:aim,strength,life:0,
-      lastPosition:mesh.position.clone(),targetBuildingId:targetStorey?.building.id??null});
+    this.meteors.push({mesh,aggregate,velocity,system,target:aim,strength,life:0,
+      lastPosition:mesh.position.clone(),targetBuildingId:targetStorey?.building.id??null,
+      phase:'flight',contact:null,impactAge:0,explosionDelay:0});
     this.shake=Math.max(this.shake,.3);this.emitSound('wind',.55);
     this.events.onStatus?.('INCOMING PROJECTILE','Trajectory locked. Brace for impact.');
   }
-  detonate(m,contact=null){
-    const p=contact?.point?.clone()||m.mesh.getAbsolutePosition().clone();
+  // At FIRST CONTACT transfer kinetic energy AND trigger the blast in the same
+  // physics tick. No delayed explosion and no bouncing off a hard roof.
+  beginMeteorImpact(m,contact){
+    if(m.phase!=='flight')return;
+    const hit=contact||{point:m.mesh.getAbsolutePosition().clone(),entry:null,kind:'ground'};
+    const p=hit.point.clone();
+    const velocity=m.velocity.clone();
+    const direction=velocity.lengthSquared()>1e-6?velocity.normalize():V(-.25,-1,-.2).normalize();
+    m.phase='embedded';m.contact={point:p,entry:hit.entry||null,kind:hit.entry?'building':'ground'};
+    m.impactAge=0;m.contactTime=this.time;
+    const w=this.world;
+    // Remove projectile collision body immediately: no rolling, sliding or bouncing.
+    if(m.aggregate){m.aggregate.dispose();m.aggregate=null}
+    m.velocity=V(0,0,0);
+    m.penetrationDirection=direction;
+    m.penetrationOrigin=p.clone();
+    m.penetrationDistance=hit.entry?1.15+1.75*m.strength:.35;
+    m.mesh.position=p.add(direction.scale(.5));
+    m.lowerDamaged=false;
+    m.nextStorey=hit.entry?.building.floors[hit.entry.storey-1]||null;
+    m.mesh.rotation.set(rand(-.25,.25),rand(0,6.28),rand(-.25,.25));
+    m.system.emitRate=100;
+    const brokenBefore=w.brokenFloors;
+    const immediate=w.kineticMeteorImpact(p,direction,m.strength,hit.entry||null);
+    m.immediateBroken=w.brokenFloors-brokenBefore;
+    m.immediatePieces=immediate;
+    this.lastMeteorImpact={x:p.x,y:p.y,z:p.z,buildingId:hit.entry?.building.id??null,
+      phase:'impact',contactType:hit.entry?'building':'ground',directBroken:m.immediateBroken,
+      physicalPieces:immediate,shockwaveBroken:0,exploded:false,
+      delay:0,impactTime:this.time,explosionTime:null,totalBroken:w.brokenFloors};
+    this.meteorEvents.push({type:'physical-contact',time:this.time,broken:w.brokenFloors,
+      directBroken:m.immediateBroken,physicalPieces:immediate,contactType:m.contact.kind});
+    w.createBurst(p,'dust',65,.38+m.strength*.35);
+    this.shake=Math.max(this.shake,.65*m.strength);
+    // Advance the projectile slightly INTO the penetrated surface, then
+    // initiate the blast with no frame delay. The disintegrated building
+    // chunks already have real Havok impulses from kineticMeteorImpact().
+    m.mesh.position.copyFrom(p.add(direction.scale(m.penetrationDistance)));
+    this.detonate(m);
+    m.phase='done';
+  }
+
+  detonate(m){
+    // Explode where the meteor has actually tunneled into the structure,
+    // not at the old surface intersection above the roof.
+    const p=m.mesh.position.clone();
     const ground=V(p.x,.6,p.z),strength=m.strength,w=this.world;
-    // A direct hit ALWAYS breaks the impacted segment and adjacent load-bearing pieces.
-    let directBroken=0;
-    if(contact?.entry){
-      const e=contact.entry,building=e.building;
-      const neighbors=[e,building.floors[e.storey-1],building.floors[e.storey+1]];
-      for(const hit of neighbors){
-        if(!hit||hit.active)continue;
-        const center=hit.mesh.getAbsolutePosition();
-        const impulse=center.subtract(p).normalize().scale(28+42*strength)
-          .add(V(0,6+14*strength,0));
-        if(w.release(hit,impulse))directBroken++;
-      }
-    }
-    const r=17+27*strength;
-    const splashBroken=w.fractureAt(p,r,1.35+strength*.6,'blast');
+    const brokenBefore=w.brokenFloors;
+    // Bound the number of physics bodies spawned in one frame to avoid a
+    // long synchronous Havok update that looks like a frozen browser.
+    const scale=meteorScale(strength);
+    const r=scale.radius;
+    // A few closest sections are struck in the SAME frame. Subsequent
+    // districts are hit when the travelling pressure front reaches them.
+    const wave=this.startBlastWave(p,strength);
+    const splashBroken=wave.broken;
     this.lastMeteorImpact={
-      x:p.x,y:p.y,z:p.z,buildingId:contact?.entry?.building.id??null,
-      directBroken,shockwaveBroken:splashBroken,totalBroken:w.brokenFloors
+      ...this.lastMeteorImpact,x:p.x,y:p.y,z:p.z,phase:'explosion',exploded:true,
+      directBroken:m.immediateBroken,physicalPieces:m.immediatePieces,
+      shockwaveBroken:splashBroken,waveRadius:r,explosionTime:this.time,
+      elapsedAfterContact:this.time-m.contactTime,totalBroken:w.brokenFloors
     };
-    w.tossDebris(V(p.x,Math.max(2,p.y*.38),p.z),Math.floor(12+24*strength),strength);
-    this.world.createBurst(p,'fire',Math.floor(120+180*m.strength),1.2+m.strength);
-    this.world.createBurst(ground,'dust',Math.floor(150+230*m.strength),.65+m.strength);
-    this.world.scorch(ground,5+10*m.strength,true);
-    this.waveRing(ground,'#ffc58b',4+20*m.strength,1.1);
-    this.waveRing(ground,'#f1bb80',7+26*m.strength,1.7);
+    this.meteorEvents.push({type:'explosion',time:this.time,broken:w.brokenFloors,
+      directBroken:m.immediateBroken,shockwaveBroken:splashBroken,contactType:m.contact.kind});
+    this.meteorHistory.push({...this.lastMeteorImpact});
+    if(this.meteorHistory.length>16)this.meteorHistory.shift();
+    wave.impactLog=this.meteorHistory.at(-1);
+    if(wave.finished)this.finishBlastLog(wave);
+    w.tossDebris(V(p.x,Math.max(2,p.y*.38),p.z),Math.round(2+14*strength),.22+.78*strength);
+    this.world.createBurst(p,'fire',scale.particles,.7+strength*1.3);
+    this.world.createBurst(ground,'dust',Math.round(scale.particles*.85),.6+strength);
+    this.world.scorch(ground,3+scale.coreRadius*.65,true);
+    this.waveRing(ground,'#ffc58b',r,Math.max(.8,r/scale.waveSpeed));
+    this.waveRing(ground,'#f1bb80',r*.75,Math.max(.65,r/scale.waveSpeed*.86));
     const light=new PointLight('impact illumination',p.add(V(0,5,0)),this.scene);
     light.intensity=120* Math.max(.4,m.strength);light.range=65;light.diffuse=Color3.FromHexString('#ff9f53');
     this.effects.push({type:'flash',light,age:0,maxAge:.5});
     this.shake=Math.max(this.shake,2.3*m.strength);
     this.emitSound('boom',1.2*m.strength);
     this.events.onImpact?.(m.strength);
-    m.system.stop();m.system.dispose();m.aggregate.dispose();m.mesh.dispose();
+    m.system.stop();m.system.dispose();if(m.aggregate)m.aggregate.dispose();m.mesh.dispose();
+  }
+
+  startBlastWave(center,power){
+    const config=meteorScale(power);
+    const targets=[];
+    for(const entry of this.world.structures){
+      if(entry.active)continue;
+      const p=entry.mesh.getAbsolutePosition();
+      const distance=Math.hypot(p.x-center.x,p.z-center.z,(p.y-center.y)*.26);
+      if(distance<config.radius){
+        targets.push({entry,distance});
+      }
+    }
+    targets.sort((a,b)=>a.distance-b.distance);
+    const wave={center:center.clone(),power,config,targets,cursor:0,age:0,broken:0,
+      damaged:0,finished:false,firstTime:this.time};
+    this.blastWaves.push(wave);
+    if(power>.65)this.world.massBlastActive=true;
+    // Process the immediate epicenter; the rest is a travelling shockwave.
+    this.updateBlastWave(wave,0,true);
+    return wave;
+  }
+
+  finishBlastLog(wave){
+    if(!wave.impactLog)return;
+    wave.impactLog.shockwaveBroken=wave.broken;
+    wave.impactLog.totalBroken=this.world.brokenFloors;
+    wave.impactLog.waveDuration=wave.age;
+    wave.impactLog.waveFinished=true;
+    if(this.lastMeteorImpact?.impactTime===wave.firstTime){
+      Object.assign(this.lastMeteorImpact,wave.impactLog);
+    }
+  }
+
+  updateBlastWave(wave,dt,initial=false){
+    wave.age+=dt;
+    const {config,center,power}=wave;
+    const frontier=initial?Math.min(12,config.radius):config.waveSpeed*wave.age+6;
+    // Throttle creation of Havok rigid bodies separately from damage checks:
+    // at most two disintegrating floors and eight section updates per frame.
+    let checked=0,released=0;
+    const maxChecks=initial?4:8,maxBreaks=initial?2:2;
+    while(wave.cursor<wave.targets.length&&checked<maxChecks){
+      const item=wave.targets[wave.cursor];
+      if(item.distance>frontier)break;
+      const entry=item.entry;
+      if(entry.active){wave.cursor++;continue}
+      const falloff=Math.max(0,1-item.distance/config.radius);
+      let damage=meteorWaveDamage(power,item.distance);
+      if(item.distance<=config.coreRadius*.82){
+        damage=Math.max(damage,entry.maxHealth*1.24);
+      }
+      // Don't start another dynamic fracture when the per-frame budget is spent.
+      if(entry.health<=damage&&released>=maxBreaks)break;
+      wave.cursor++;checked++;
+      if(damage<1)continue;
+      const pos=entry.mesh.getAbsolutePosition();
+      const radial=pos.subtract(center),dist=Math.max(1,Math.hypot(radial.x,radial.z));
+      const force=V(radial.x/dist*config.impulse*falloff,
+        Math.max(2,config.impulse*(.11+.17*falloff)),
+        radial.z/dist*config.impulse*falloff);
+      if(this.world.damageStructure(entry,damage,force,center,'blast')){
+        released++;wave.broken++;
+      }else if(entry.health<entry.maxHealth)wave.damaged++;
+    }
+    if(wave.cursor>=wave.targets.length){
+      wave.finished=true;
+      this.finishBlastLog(wave);
+      this.blastHistory.push({power,radius:config.radius,broken:wave.broken,
+        damaged:wave.damaged,targets:wave.targets.length,duration:wave.age});
+      if(this.blastHistory.length>12)this.blastHistory.shift();
+    }
   }
 
   waveRing(p,color,maxRadius=25,duration=1.3){
@@ -163,7 +294,8 @@ export class DisasterSystem{
       clouds.push({mesh:sphere,r:rand(2,10),height:rand(.4,27),phase:rand(0,6),speed:rand(2,5)});
     }
     const effect={type:'tornado',root,cone,rings,clouds,age:0,duration:10+strength*6,strength,
-      origin:position.clone(),phase:0,lastPulse:0,noise:rand(0,5)};
+      origin:position.clone(),phase:0,lastPulse:0,noise:rand(0,5),world:w,
+      windTracks:new Map()};
     this.effects.push(effect);
     w.createBurst(position,'dust',190,1);
     this.shake=Math.max(this.shake,.7);
@@ -244,18 +376,34 @@ export class DisasterSystem{
     this.time+=dt;
     for(let i=this.meteors.length-1;i>=0;i--){
       const m=this.meteors[i];m.life+=dt;
-      const p=m.mesh.getAbsolutePosition().clone();
-      const radius=(1.7+m.strength*1.65);
-      const contact=this.findMeteorContact(m.lastPosition,p,radius);
+      if(m.phase==='done'){this.meteors.splice(i,1);continue}
+      // Sweep the meteor along its ballistic path BEFORE Havok runs collision
+      // resolution. Its fragments are still real Havok physics objects.
+      m.lastPosition=m.mesh.position.clone();
+      m.velocity.y-=18*dt;
+      const next=m.mesh.position.add(m.velocity.scale(dt));
+      const radius=1.2+2.8*Math.pow(m.strength,.55);
+      const contact=this.findMeteorContact(m.lastPosition,next,radius);
       if(contact){
-        this.detonate(m,contact);
+        this.beginMeteorImpact(m,contact);
         this.meteors.splice(i,1);
-      }else if(p.y<=radius*.7||m.life>3.3){
-        // Even a ground impact applies a physically simulated blast to nearby structures.
-        this.detonate(m);
+      }else if(next.y<=radius+.35||m.life>3.1){
+        const point=V(next.x,Math.max(radius*.9,0.8),next.z);
+        this.beginMeteorImpact(m,{point,entry:null,kind:'ground'});
         this.meteors.splice(i,1);
-      }else{
-        m.lastPosition=p;
+      }else m.mesh.position.copyFrom(next);
+    }
+    for(let i=this.blastWaves.length-1;i>=0;i--){
+      const wave=this.blastWaves[i];
+      if(!wave.finished)this.updateBlastWave(wave,dt);
+      if(wave.finished||wave.age>wave.config.maxWaveAge+5){
+        if(!wave.finished){
+          this.blastHistory.push({power:wave.power,radius:wave.config.radius,
+            broken:wave.broken,damaged:wave.damaged,targets:wave.targets.length,
+            processed:wave.cursor,duration:wave.age,timeout:true});
+        }
+        this.blastWaves.splice(i,1);
+        if(this.blastWaves.every(w=>w.power<=.65))this.world.massBlastActive=false;
       }
     }
     for(let i=this.shocks.length-1;i>=0;i--){
@@ -281,8 +429,10 @@ export class DisasterSystem{
   tickTornado(fx,dt){
     const w=this.world,t=fx.age,k=fx.strength;
     // Slow lateral wandering around target.
-    fx.root.position.x=clamp(fx.origin.x+Math.sin(t*.45+fx.noise)*12,-70,70);
-    fx.root.position.z=clamp(fx.origin.z+Math.cos(t*.37+fx.noise)*10,-70,70);
+    // Gentle drift so lifted objects have time to orbit the funnel, instead
+    // of chasing a center that runs away from them.
+    fx.root.position.x=clamp(fx.origin.x+Math.sin(t*.23+fx.noise)*6,-70,70);
+    fx.root.position.z=clamp(fx.origin.z+Math.cos(t*.22+fx.noise)*5,-70,70);
     fx.cone.rotation.y+=dt*.8;
     for(const ring of fx.rings){
       ring.phase+=dt*(1.5+ring.height*.09);
@@ -297,26 +447,50 @@ export class DisasterSystem{
       mote.mesh.scaling.setAll(1+Math.sin(mote.phase*2)*.15);
     }
     const center=fx.root.position, radius=14+24*k;
+    // Buildings have structural resistance: weak tornadoes cannot detach
+    // load-bearing floors. Sustained powerful winds gradually fatigue the frame.
     for(const e of w.structures){
+      if(e.active||k<=.38)continue;
       const p=e.mesh.getAbsolutePosition(),dx=p.x-center.x,dz=p.z-center.z;
       const dist=Math.hypot(dx,dz);
       if(dist>radius)continue;
-      if(!e.active){
-        if(Math.random()<dt*(.5+1.9*k)*(1-dist/radius)){
-          const tangent=V(-dz/Math.max(1,dist)*(18+19*k),rand(8,23)*k,dx/Math.max(1,dist)*(18+19*k));
-          w.release(e,tangent,p);
-        }
-      }
+      const falloff=Math.max(0,1-dist/radius);
+      const damage=tornadoDamagePerSecond(k,falloff)*dt;
+      if(damage<=0)continue;
+      const tangent=V(-dz/Math.max(1,dist)*(8+28*k*k),5+16*k*k,dx/Math.max(1,dist)*(8+28*k*k));
+      w.damageStructure(e,damage,tangent,p,'tornado');
     }
     for(const part of w.fragments){
-      const p=part.mesh.getAbsolutePosition(),dx=p.x-center.x,dz=p.z-center.z;
-      if(Math.hypot(dx,dz)>radius)continue;
-      const force=V(-dz*(16+18*k),340*k+12*Math.max(0,radius-Math.hypot(dx,dz)),dx*(16+18*k));
-      part.aggregate.body.applyForce(force,p);
+      if(!part.aggregate)continue;
+      const p=part.mesh.getAbsolutePosition();
+      blowBody(part.aggregate.body,p,center,radius,k,dt,part.kind==='wall'?'wall':'rubble',fx);
+    }
+    for(const part of w.debris){
+      if(!part.aggregate)continue;
+      blowBody(part.aggregate.body,part.mesh.position,center,radius,k,dt,'rubble',fx);
     }
     for(const prop of w.props){
-      const p=prop.mesh.position,dx=p.x-center.x,dz=p.z-center.z,dist=Math.hypot(dx,dz);
-      if(dist<radius)prop.aggregate.body.applyForce(V(-dz*28,450*k,dx*28),p);
+      if(prop.type==='crane'||!prop.aggregate)continue;
+      const p=prop.mesh.getAbsolutePosition();
+      if(blowBody(prop.aggregate.body,p,center,radius,k,dt,'car',fx)&&p.y>2.2){
+        w.windCarsLifted.add(prop.mesh.uniqueId);
+      }
+    }
+    // Settled panels and slabs were static performance proxies. Re-enable Havok
+    // physics for nearby loose debris instead of leaving it nailed to the ground.
+    fx.liftPulse=(fx.liftPulse||0)+dt;
+    if(fx.liftPulse>.29){
+      fx.liftPulse=0;
+      activateWindRubble(w,center,radius,k,4);
+    }
+    // Visual-only fallback rubble is still caught by the airflow.
+    for(const part of w.visualFragments){
+      const p=part.mesh.position;
+      if(Math.hypot(p.x-center.x,p.z-center.z)>radius)continue;
+      const dx=p.x-center.x,dz=p.z-center.z,d=Math.max(1,Math.hypot(dx,dz));
+      part.velocity.x+=(-dz/d*13-dx/d*3)*dt*k;
+      part.velocity.z+=(dx/d*13-dz/d*3)*dt*k;
+      part.velocity.y+=35*dt*k;
     }
     for(const tree of w.trees){
       const dist=Math.hypot(tree.x-center.x,tree.z-center.z);
@@ -339,7 +513,8 @@ export class DisasterSystem{
     bolt.material=this.material('electric flash','#c9effb',.93,'#e7f4ff');bolt.isPickable=false;
     const lamp=new PointLight('electric arc',p.add(V(0,16,0)),this.scene);lamp.diffuse=Color3.FromHexString('#c7e7ff');lamp.intensity=42;lamp.range=46;
     this.effects.push({type:'lightning',bolt,light:lamp,age:0,duration:.21});
-    this.world.fractureAt(V(p.x,7,p.z),9,.24);
+    // Lightning here is a visual effect; it must not randomly demolish
+    // whole buildings during a weak tornado.
     this.shake=Math.max(this.shake,.35);
   }
 
