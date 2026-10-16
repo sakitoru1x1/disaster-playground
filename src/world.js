@@ -5,8 +5,10 @@ import {
   Animation, VertexBuffer, Mesh, Matrix
 } from '@babylonjs/core';
 import {fractureStorey} from './fracture.js';
-import {splitOnCollision} from './secondaryFracture.js';
+import {splitOnCollision,splitVisualOnLanding,queueSecondaryFracture,canVisuallyFracture} from './secondaryFracture.js';
+import {populateCityLife,affectCityLife,updateCityLife} from './cityLife.js';
 import {planCity} from './cityLayout.js';
+import {makeFacadeWindows,compactSettledRubble} from './perfGeometry.js';
 import {sectionResistance,meteorDirectDamage,meteorBlastDamage,tornadoDamagePerSecond} from './structuralDamage.js';
 import {meteorHitDistribution,meteorScale} from './meteorBalance.js';
 
@@ -23,15 +25,29 @@ export class CityWorld {
     this.buildingCount=Math.max(1,Math.min(30,Math.round(buildingCount)));
     this.structures=[];this.buildings=[];this.props=[];this.trees=[];this.debris=[];
     this.fragments=[];this.rubble=[];this.pendingFailures=[];this.slabFractures=[];this.maxFragmentBodies=260;
+    this.staticRubbleBatches=[];this.bakedRubbleMeshes=0;this.rubbleBatchSavedDraws=0;this.nextRubbleBatchTime=0;
+    this.fracturesThisFrame=0;this.maxFracturesPerFrame=this.mobile?2:3;
+    this.maxCascadeReleasesPerFrame=this.mobile?1:2;this.cascadeDeferred=0;
     this.maxPrimaryFragmentBodies=175;this.pendingSecondary=[];this.secondaryBreaks=0;
-    this.secondaryPieces=0;this.secondaryWallBreaks=0;this.secondaryImpactEvents=0;this.maxSecondaryBreaks=200;
+    this.secondaryQueuePeak=0;this.secondaryDeferred=0;this.secondaryMissed=0;
+    this.visualFractureQueue=[];this.visualFractureDeferred=0;this.visualFractureMissed=0;
+    this.secondaryPieces=0;this.secondaryWallBreaks=0;this.tertiaryBreaks=0;
+    this.secondaryImpactEvents=0;this.maxSecondaryBreaks=300;
+    this.secondaryVisualWindow=0;this.maxVisualSecondaryPerWindow=this.mobile?22:68;
+    this.tertiaryWindowCount=0;this.maxTertiaryPerWindow=this.mobile?18:42;
     this.secondaryWallVisualWindow=0;this.maxWallVisualPerWindow=14;
     this.maxSecondaryPerWindow=16;this.secondaryWindowCount=0;this.secondaryWindowStart=0;
     this.visualFragments=[];this.maxVisualFragments=290;this.visualDropped=0;
+    this.groundedFracturePieces=0;this.groundContactFractures=0;
     this.massBlastActive=false;this.massBlastMarks=0;
-    this.particles=[];this.scars=[];this.impactCount=0;this.totalFloors=0;this.brokenFloors=0;
+    this.particles=[];this.particlePool=[];this.particlesSkipped=0;
+    this.maxConcurrentParticles=this.mobile?10:18;
+    this.maxPooledParticles=this.mobile?10:18;
+    this.scars=[];this.decorativeMarks=[];this.lastMarkCleanup=0;this.maxDecorativeMarks=this.mobile?35:85;
+    this.impactCount=0;this.totalFloors=0;this.brokenFloors=0;
     this.activeBodies=0;this.time=0;this.maxDebris=110;
     this.windLifted=0;this.windEjected=0;this.windCarsLifted=new Set();this.kineticImpacts=0;
+    this.tsunamiSectionHits=0;this.tsunamiDeferred=0;
     this.materials={};this.shadow=null;this.glow=null;
     this.init();
   }
@@ -80,6 +96,7 @@ export class CityWorld {
     this.makeTerrain();
     this.makeDistricts();
     this.makeProps();
+    populateCityLife(this);
     this.optimizeStaticGeometry();
   }
 
@@ -123,6 +140,8 @@ export class CityWorld {
     m.tree=this.mat('mint foliage','#448878');m.tree2=this.mat('sunny foliage','#76aa7e');m.trunk=this.mat('tree bark','#645443');
     m.dark=this.mat('roof graphite','#424c59');m.trim=this.mat('highlights','#dddbc9');
     m.concrete=this.mat('broken exposed concrete','#888b86');
+    m.rubbleSurface=this.mat('rubble colored paint, glazing and fracture faces','#ffffff');
+    m.rubbleSurface.specularColor=hex('#161b1d');
     m.glass=this.mat('window blue','#558da0',{emissive:'#163747'});
     m.glassLit=this.mat('window warm','#edbc85',{emissive:'#8d5f35'});
     m.carDark=this.mat('car glass','#233747',{emissive:'#0c2335'});
@@ -264,13 +283,8 @@ export class CityWorld {
       const topBand=this.box('horizontal cornice',[w+.11,.075,d+.11],V(0,fh*.5-.15,0),n%2?this.materials.trim:this.materials.wallsAccent[style],mesh);
       // Avoid highly visible horizontal bands that make facades resemble stacked slices.
       const baseBand=null;
-      // Texture-mapped glass bands remain parented to their simulated floor.
-      for(const side of [-1,1]){
-        const p=this.windowMaster.createInstance('window face');
-        p.scaling.set(w*.83,fh*.52,1);p.position=V(0,0,side*(d/2+.022));p.parent=mesh;p.isPickable=false;
-        const q=this.windowMaster.createInstance('window side');
-        q.scaling.set(d*.81,fh*.52,1);q.rotation.y=Math.PI/2;q.position=V(side*(w/2+.022),0,0);q.parent=mesh;q.isPickable=false;
-      }
+      // One UV-mapped mesh for all four sides instead of four scene objects.
+      makeFacadeWindows(this.scene,mesh,this.windowMat,w,d,fh);
       if(isTop){
         const roof=this.box('roof cap',[w+.65,.25,d+.65],V(0,fh*.5+.02,0),this.materials.dark,mesh);
         if(index%3===0){
@@ -410,6 +424,7 @@ export class CityWorld {
       }
       const crack=MeshBuilder.CreateLines('structural stress crack',{points},this.scene);
       crack.color=Color3.FromHexString('#20232b');crack.isPickable=false;
+      this.trackDecorativeMark(crack,entry,48);
       this.createBurst(points[1],'dust',Math.round(7+9*amount/entry.maxHealth),.18);
       if(source==='meteor'||source==='blast'){
         const hit=impactAt||center;
@@ -420,20 +435,34 @@ export class CityWorld {
     }
     if(entry.health>0)return false;
     const released=this.release(entry,impulse,impactAt);
-    if(!released)entry.health=.1; // collider remains intact if physics budget fills.
+    // With both fragment budgets exhausted, release() can fail without
+    // creating a retry. Never heal this critically damaged section to 0.1.
+    if(!released)this.enqueueStructuralFailure(entry,impulse,.25);
     return released;
   }
 
+  beginFrame(){this.fracturesThisFrame=0}
+  enqueueStructuralFailure(entry,impulse,delay=.12){
+    if(!entry||entry.active||entry.pendingFailure)return;
+    entry.pendingFailure=true;
+    this.pendingFailures.push({entry,time:delay,impulse:impulse.clone()});
+  }
   release(entry,impulse=V(0,0,0),impactAt=null){
     if(entry.active)return false;
+    // Shared frame budget for meteor, quake, tsunami and cascade failures.
+    // Never discard an overload: retry the still-intact section later.
+    if(this.fracturesThisFrame>=this.maxFracturesPerFrame){
+      this.enqueueStructuralFailure(entry,impulse);
+      this.cascadeDeferred++;
+      return false;
+    }
     if(!fractureStorey(this,entry,impulse,impactAt))return false;
+    this.fracturesThisFrame++;
     // Removing ANY structural storey removes support for the entire stack above it.
     // Schedule the next intact upper floor, even if the destroyed floor was itself high.
     const above=entry.building.floors[entry.storey+1];
-    if(above&&!above.active&&!above.pendingFailure){
-      above.pendingFailure=true;
-      this.pendingFailures.push({entry:above,time:rand(.33,.76),impulse:impulse.scale(.34).add(V(rand(-5,5),rand(2,7),rand(-5,5)))});
-    }
+    if(above&&!above.active)
+      this.enqueueStructuralFailure(above,impulse.scale(.34).add(V(rand(-5,5),rand(2,7),rand(-5,5))),rand(.33,.76));
     return true;
   }
 
@@ -536,12 +565,23 @@ export class CityWorld {
 
   createBurst(position,type='dust',amount=240,power=1){
     if(this.mobile)amount=Math.min(amount,type==='dust'?44:52);
-    const tex=this.getParticleTexture();
-    const system=new ParticleSystem('volumetric '+type,amount,this.scene);
-    system.particleTexture=tex;system.emitter=position.clone();
+    const reusableIndex=this.particlePool.findIndex(item=>item.type===type);
+    let system;
+    if(reusableIndex>=0){
+      system=this.particlePool.splice(reusableIndex,1)[0].system;
+      system.reset();
+    }else{
+      if(this.particles.length+this.particlePool.length>=this.maxConcurrentParticles){
+        this.particlesSkipped++;return null;
+      }
+      system=new ParticleSystem('pooled '+type,Math.max(128,amount),this.scene);
+      system.particleTexture=this.getParticleTexture();
+    }
+    system.emitter=position.clone();
     system.minSize=type==='fire'?.5:1.3;system.maxSize=type==='fire'?2.4:5.4;
     system.minLifeTime=.45;system.maxLifeTime=type==='dust'?2.8:1.3;
-    system.emitRate=amount*5;system.manualEmitCount=amount;
+    // One-shot burst: no continuous emission or repeated allocations.
+    system.emitRate=0;system.manualEmitCount=amount;
     system.minEmitPower=4*power;system.maxEmitPower=18*power;
     system.direction1=V(-1,0,-1);system.direction2=V(1,2,1);
     system.minAngularSpeed=-3;system.maxAngularSpeed=3;
@@ -557,7 +597,7 @@ export class CityWorld {
       system.colorDead=new Color4(.36,.39,.41,0);
     }
     system.updateSpeed=.012;system.start();
-    this.particles.push({system,expires:performance.now()+Math.max(2400,system.maxLifeTime*2500)});
+    this.particles.push({system,type,expires:performance.now()+Math.max(900,system.maxLifeTime*1100)});
     return system;
   }
   getParticleTexture(){
@@ -577,29 +617,101 @@ export class CityWorld {
     disk.material=this.mat('scorch mark '+this.scars.length,fire?'#302d2e':'#505557',{alpha:.5});
     disk.isPickable=false;
     this.scars.push(disk);
-    if(this.scars.length>40)this.scars.shift().dispose();
+    if(this.scars.length>40){
+      const old=this.scars.shift(),material=old.material;
+      old.dispose();material?.dispose();
+    }
     return disk;
   }
 
+  visualFracturePriority(part){
+    const sizes=part.mesh?.metadata?.fragmentSize;
+    if(!sizes)return 0;
+    const dims=[...sizes].sort((a,b)=>b-a);
+    return dims[0]*dims[1]*(part.kind==='slab'?2.6:1)*
+      (part.secondaryGeneration?0.65:1.3);
+  }
+  queueVisualFracture(part,delay=.55){
+    if(!part.mesh||part.mesh.isDisposed()||this.secondaryBreaks>=this.maxSecondaryBreaks){
+      this.visualFractureMissed++;return false;
+    }
+    const priority=this.visualFracturePriority(part);
+    const maxPending=this.mobile?110:220;
+    if(this.visualFractureQueue.length>=maxPending){
+      let worst=0;
+      for(let i=1;i<this.visualFractureQueue.length;i++)
+        if(this.visualFractureQueue[i].priority<this.visualFractureQueue[worst].priority)worst=i;
+      if(priority<=this.visualFractureQueue[worst].priority){
+        this.visualFractureMissed++;return false;
+      }
+      const removed=this.visualFractureQueue.splice(worst,1)[0];
+      if(!removed.part.mesh.isDisposed())
+        removed.part.mesh.metadata.pendingVisualFracture=false;
+      this.visualFractureMissed++;
+    }
+    part.mesh.metadata={...(part.mesh.metadata||{}),pendingVisualFracture:true};
+    this.visualFractureQueue.push({part,nextAttempt:this.time+delay,tries:0,priority});
+    this.visualFractureDeferred++;
+    return true;
+  }
+  trackDecorativeMark(mesh,entry=null,lifespan=42){
+    const item={mesh,entry,expires:this.time+lifespan};
+    this.decorativeMarks.push(item);
+    while(this.decorativeMarks.length>this.maxDecorativeMarks){
+      const old=this.decorativeMarks.shift();if(!old.mesh.isDisposed())old.mesh.dispose();
+    }
+    return mesh;
+  }
+  affectLife(kind,center,power,radius,dt){affectCityLife(this,kind,center,power,radius,dt)}
   integrity(){return Math.max(0,Math.round(100*(1-this.brokenFloors/this.totalFloors)))}
   update(dt){
     this.time+=dt;
+    updateCityLife(this,dt);
+    if(this.time-this.lastMarkCleanup>2){
+      this.lastMarkCleanup=this.time;
+      for(let i=this.decorativeMarks.length-1;i>=0;i--){
+        const mark=this.decorativeMarks[i];
+        if(mark.mesh.isDisposed()||mark.entry?.active||mark.expires<this.time){
+          if(!mark.mesh.isDisposed())mark.mesh.dispose();
+          this.decorativeMarks.splice(i,1);
+        }
+      }
+    }
     // Renew the secondary fracture budget periodically, so later disasters work too.
     if(this.time-this.secondaryWindowStart>10){
       this.secondaryWindowStart=this.time;this.secondaryWindowCount=0;
-      this.secondaryWallVisualWindow=0;
+      this.secondaryWallVisualWindow=0;this.secondaryVisualWindow=0;
+      this.tertiaryWindowCount=0;
     }
-    // Process contact impulses after Havok has completed its physics step.
-    const batch=this.pendingSecondary.splice(0,5);
-    for(const contact of batch){
-      if(contact.fragment.aggregate){
-        this.secondaryImpactEvents++;
-        splitOnCollision(this,contact.fragment,contact);
+    // If the global lifetime limit is reached, no future retry can succeed.
+    if(this.secondaryBreaks>=this.maxSecondaryBreaks&&this.pendingSecondary.length){
+      for(const job of this.pendingSecondary){job.fragment.secondaryQueued=false;this.secondaryMissed++}
+      this.pendingSecondary.length=0;
+    }
+    // Highest-energy slabs first; retry capacity failures without forgetting
+    // the contact. Keep per-frame work bounded even for citywide collapses.
+    this.pendingSecondary.sort((a,b)=>b.priority-a.priority);
+    let attempts=0;
+    for(let i=0;i<this.pendingSecondary.length&&attempts<4;){
+      const job=this.pendingSecondary[i],part=job.fragment;
+      if(!part.aggregate||part.mesh.isDisposed()||part.secondaryGeneration>=2){
+        part.secondaryQueued=false;this.pendingSecondary.splice(i,1);this.secondaryMissed++;continue;
       }
+      if(this.time<job.nextAttempt){i++;continue}
+      attempts++;this.secondaryImpactEvents++;
+      if(splitOnCollision(this,part,job)){
+        this.pendingSecondary.splice(i,1);part.secondaryQueued=false;continue;
+      }
+      job.retries++;this.secondaryDeferred++;
+      job.nextAttempt=this.time+Math.min(2,.22+job.retries*.2);
+      i++;
     }
+    let cascadesThisFrame=0;
     for(let i=this.pendingFailures.length-1;i>=0;i--){
       const failure=this.pendingFailures[i];failure.time-=dt;
-      if(failure.time<=0){
+      if(failure.time<=0&&cascadesThisFrame<this.maxCascadeReleasesPerFrame&&
+         this.fracturesThisFrame<this.maxFracturesPerFrame){
+        cascadesThisFrame++;
         this.pendingFailures.splice(i,1);
         if(!failure.entry.active){
           failure.entry.pendingFailure=false;
@@ -610,8 +722,14 @@ export class CityWorld {
         }
       }
     }
-    for(const item of this.particles.slice()){
-      if(performance.now()>item.expires){item.system.stop();item.system.dispose();this.particles.splice(this.particles.indexOf(item),1)}
+    for(let i=this.particles.length-1;i>=0;i--){
+      const item=this.particles[i];
+      if(performance.now()<=item.expires)continue;
+      item.system.stop();item.system.reset();
+      this.particles.splice(i,1);
+      if(this.particlePool.length<this.maxPooledParticles)
+        this.particlePool.push({system:item.system,type:item.type});
+      else item.system.dispose();
     }
     // Visual fragments still fall from the damaged storey when the Havok budget is full.
     // Simulated gravity and a ground contact prevent abrupt disappearing/teleporting.
@@ -626,18 +744,75 @@ export class CityWorld {
       item.mesh.rotation.addInPlace(item.angular.scale(dt));
       if(item.mesh.position.y<=item.floorY){
         item.mesh.position.y=item.floorY;
+        if((item.kind==='slab'||item.kind==='wall')&&canVisuallyFracture(item)){
+          if(splitVisualOnLanding(this,item)){
+            this.visualFragments.splice(i,1);continue;
+          }
+          // Continue retrying after the window quota refreshes.
+          item.retryVisualFracture=this.queueVisualFracture(item,1);
+        }
         item.velocity.setAll(0);item.angular.setAll(0);
         item.settled=true;item.mesh.metadata.visualFalling=false;
       }
+    }
+    if(this.secondaryBreaks>=this.maxSecondaryBreaks&&this.visualFractureQueue.length){
+      for(const job of this.visualFractureQueue){
+        if(!job.part.mesh.isDisposed())job.part.mesh.metadata.pendingVisualFracture=false;
+        this.visualFractureMissed++;
+      }
+      this.visualFractureQueue.length=0;
+    }
+    if(this.time>=(this.nextVisualSortTime||0)){
+      this.nextVisualSortTime=this.time+1.5;
+      this.visualFractureQueue.sort((a,b)=>b.priority-a.priority);
+    }
+    // Retry settled visual slabs once the quota is available; preserve the
+    // original mesh until a replacement has actually been created.
+    let visualAttempts=0;
+    for(let i=0;i<this.visualFractureQueue.length&&visualAttempts<4;){
+      const job=this.visualFractureQueue[i],part=job.part;
+      if(!part.mesh||part.mesh.isDisposed()||this.secondaryBreaks>=this.maxSecondaryBreaks){
+        this.visualFractureMissed++;this.visualFractureQueue.splice(i,1);continue;
+      }
+      if(this.time<job.nextAttempt){i++;continue}
+      visualAttempts++;
+      if(splitVisualOnLanding(this,part)){
+        const rubbleIndex=this.rubble.indexOf(part.mesh);
+        if(rubbleIndex!==-1)this.rubble.splice(rubbleIndex,1);
+        this.visualFractureQueue.splice(i,1);continue;
+      }
+      job.tries++;job.nextAttempt=this.time+Math.min(2.8,.5+.22*job.tries);
+      this.visualFractureDeferred++;i++;
     }
     // Reclaim Havok resources after fragments have come to rest on the ground.
     // Keep their final meshes visible as permanent rubble.
     for(let i=this.fragments.length-1;i>=0;i--){
       const fragment=this.fragments[i];
       fragment.age+=dt;
+      // Backup for Havok callbacks: an actual fall followed by landing is
+      // sufficient even if the collision event reports no impulse or fires late.
+      if(fragment.age>.65&&fragment.age<6&&!fragment.secondaryQueued&&
+         fragment.secondaryGeneration<2&&fragment.mesh.position.y<3.5&&
+         Math.max((fragment.fallStartY||0)-fragment.mesh.position.y,fragment.impactEnergy||0)>2.2){
+        queueSecondaryFracture(this,fragment,null,true);
+      }
       if(fragment.age<7||fragment.mesh.position.y>2.8)continue;
       const v=fragment.aggregate.body.getLinearVelocity();
       if(fragment.age<13&&v.lengthSquared()>4)continue;
+      if(fragment.secondaryQueued){
+        // The panel has landed and can wait without a live Havok body.
+        // Preserve its collision energy for a later budgeted visual fracture.
+        const pos=fragment.mesh.position;
+        const proxy={mesh:fragment.mesh,kind:fragment.kind,
+          secondaryGeneration:fragment.secondaryGeneration,
+          fallStartY:fragment.fallStartY||pos.y+3,
+          impactEnergy:Math.max(fragment.impactEnergy||0,
+            (fragment.fallStartY||pos.y)-pos.y,3.1)};
+        if(!this.queueVisualFracture(proxy,.45))this.secondaryMissed++;
+        this.pendingSecondary=this.pendingSecondary.filter(job=>job.fragment!==fragment);
+        fragment.secondaryQueued=false;
+        // Continue below and settle the now collider-free panel as rubble.
+      }
       fragment.aggregate.body.setCollisionCallbackEnabled(false);
       if(fragment.collisionObservable&&fragment.collisionObserver)fragment.collisionObservable.remove(fragment.collisionObserver);
       fragment.aggregate.dispose();
@@ -645,6 +820,10 @@ export class CityWorld {
       fragment.mesh.metadata.settled=true;
       this.rubble.push(fragment.mesh);
       this.fragments.splice(i,1);this.activeBodies=Math.max(0,this.activeBodies-1);
+    }
+    if(this.time>=this.nextRubbleBatchTime){
+      this.nextRubbleBatchTime=this.time+2.7;
+      this.rubbleBatchSavedDraws+=compactSettledRubble(this);
     }
     // Turn debris that has already settled into persistent visual rubble;
     // remove its Havok collider to avoid accumulating hundreds of bodies.

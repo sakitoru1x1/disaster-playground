@@ -65,8 +65,8 @@ function selectTool(type){
   });
   if(compactLayout())setMobileMenu(false);
   const intensity=$('#power');
-  intensity.min=type==='meteor'?'1':'15';
-  if(type!=='meteor'&&Number(intensity.value)<15)intensity.value='15';
+  intensity.min=type==='tornado'?'15':'1';
+  if(type==='tornado'&&Number(intensity.value)<15)intensity.value='15';
   updatePower();
   $$('.tool').forEach(el=>el.classList.toggle('is-active',el.dataset.tool===type));
   $('#targetCursor b').textContent=labels[type]+' TARGET';
@@ -78,8 +78,11 @@ function updatePower(){
   $('#powerValue').textContent=pct+'%';
   const minimum=selected==='meteor'?1:15;
   $('#rangeFill').style.width=((pct-minimum)/(100-minimum)*100)+'%';
-  $('#powerLevel').textContent=two(Math.max(1,Math.ceil(power*5)));
-  $('#powerDescription').textContent=selected==='meteor'?
+  const stage=(selected==='quake'||selected==='tsunami')?
+    1+Math.round(9*Math.max(0,pct-1)/99):Math.max(1,Math.ceil(power*5));
+  $('#powerLevel').textContent=two(stage);
+  $('#powerDescription').textContent=(selected==='quake'||selected==='tsunami')?
+    'LEVEL '+Math.round(1+9*Math.max(0,pct-1)/99)+' / 10':selected==='meteor'?
     (pct>=85?'CITYWIDE DISASTER':pct>=60?'DISTRICT DESTRUCTION':pct>=30?'BUILDING DESTRUCTION':pct>=10?'HEAVY LOCAL IMPACT':'LOCAL PENETRATION'):
     (pct>=85?'CATASTROPHIC':pct>=60?'SEVERE DAMAGE':pct>=35?'MODERATE DAMAGE':'LIGHT DAMAGE');
 }
@@ -310,8 +313,29 @@ async function createGame(){
     getPerf:()=>({fps:engine.getFps(),drawCalls:engine._drawCalls?.current??null,meshes:scene.meshes.length,activeMeshes:scene.getActiveMeshes().length,activeIndices:scene.getActiveIndices(),hardwareScale:engine.getHardwareScalingLevel(),width:engine.getRenderWidth(),height:engine.getRenderHeight(),shadows:world.shadow.getShadowMap()?.getSize()?.width||0,batching:world.staticBatchStats,mobile:mobileDevice,quality:mobileDevice?(qualityHigh?'SHARP':'MOBILE'):(qualityHigh?'ULTRA':'PERF')}),
     getState:()=>({fps:engine.getFps(),buildings:world.buildings.length,requestedBuildings:buildingCount,floors:world.totalFloors,broken:world.brokenFloors,
     activeBodies:world.activeBodies,impacts:world.impactCount,integrity:world.integrity(),activeEffects:disasters.effects.length,craneJointActive:!!world.crane,fragments:world.fragments.length,shadowMapSize:world.shadow.getShadowMap()?.getSize().width,pendingFailures:world.pendingFailures.length,slabFractures:world.slabFractures.length,slabSplitCounts:world.slabFractures.slice(-30).map(s=>s.requestedParts),slabPhysicalParts:world.slabFractures.reduce((a,s)=>a+s.physicalParts,0),slabStaticParts:world.slabFractures.reduce((a,s)=>a+s.staticParts,0),
-    fallingVisual:world.visualFragments.length,visibleRubble:world.rubble.length,
-    secondaryBreaks:world.secondaryBreaks,secondaryWallBreaks:world.secondaryWallBreaks,
+    fallingVisual:world.visualFragments.length,
+    groundedFracturePieces:world.groundedFracturePieces,
+    groundContactFractures:world.groundContactFractures,
+    visibleRubble:world.rubble.length+world.staticRubbleBatches.length,
+    decorativeMarks:world.decorativeMarks.length,
+    activeParticleSystems:world.particles.length,
+    pooledParticleSystems:world.particlePool.length,particlesSkipped:world.particlesSkipped,
+    bakedRubble:world.bakedRubbleMeshes,rubbleBatchCount:world.staticRubbleBatches.length,
+    rubbleBatchSavedDraws:world.rubbleBatchSavedDraws,
+    cascadeDeferred:world.cascadeDeferred,fracturesThisFrame:world.fracturesThisFrame,
+    civilians:world.civilians.length,civilianDeaths:world.civilianDeaths,
+    pedestriansFleeing:world.civilians.filter(p=>p.state==='fleeing').length,
+    carsWrecked:world.carsWrecked,
+    quakeEffects:disasters.effects.filter(e=>e.type==='quake').map(e=>({level:e.level,broken:e.broken,targetIndex:e.targetIndex,targets:e.targets.length})),
+    tsunamiEffects:disasters.effects.filter(e=>e.type==='tsunami').map(e=>({level:e.level,broken:e.broken,hit:e.damaged.size,deferred:e.deferred||0})),
+    secondaryBreaks:world.secondaryBreaks,tertiaryBreaks:world.tertiaryBreaks,
+    pendingSecondary:world.pendingSecondary.length,secondaryQueuePeak:world.secondaryQueuePeak,
+    secondaryDeferred:world.secondaryDeferred,secondaryMissed:world.secondaryMissed,
+    pendingVisualSecondary:world.visualFractureQueue.length,
+    tsunamiSectionHits:world.tsunamiSectionHits,tsunamiDeferred:world.tsunamiDeferred,
+    visualFractureDeferred:world.visualFractureDeferred,visualFractureMissed:world.visualFractureMissed,
+    tertiaryWindowCount:world.tertiaryWindowCount,
+    secondaryWallBreaks:world.secondaryWallBreaks,
     visualWallBreaks:world.secondaryWallVisualWindow,secondaryPieces:world.secondaryPieces,secondaryImpactEvents:world.secondaryImpactEvents,secondaryWindowCount:world.secondaryWindowCount,
     unsupportedFloors:world.structures.filter(e=>!e.active&&e.building.floors.slice(0,e.storey).some(low=>low.active)).length,
     damagedSections:world.structures.filter(e=>!e.active&&e.health<e.maxHealth).length,
@@ -323,11 +347,36 @@ async function createGame(){
     meteorHistory:disasters.meteorHistory.slice(-8),meteorEvents:disasters.meteorEvents.slice(-18),kineticImpacts:world.kineticImpacts,
     blastHistory:disasters.blastHistory.slice(-8),activeBlastWaves:disasters.blastWaves.length,
     waveProgress:disasters.blastWaves.map(w=>({power:w.power,cursor:w.cursor,total:w.targets.length,broken:w.broken,age:w.age})),
-    windLifted:world.windLifted,windEjected:world.windEjected,carsAirborne:world.windCarsLifted.size,
+    windLifted:world.windLifted,windEjected:world.windEjected,
+    windPhysicsUpdates:world.windPhysicsUpdates||0,carsAirborne:world.windCarsLifted.size,
     carElevations:world.props.filter(p=>p.type==='car').map(p=>+p.mesh.position.y.toFixed(2)),
     carPositions:world.props.filter(p=>p.type==='car').map(p=>({x:+p.mesh.position.x.toFixed(2),y:+p.mesh.position.y.toFixed(2),z:+p.mesh.position.z.toFixed(2)})),
     tornadoCenters:disasters.effects.filter(e=>e.type==='tornado').map(e=>({x:e.root.position.x,z:e.root.position.z})),
     airborneFragments:world.fragments.filter(p=>p.mesh.position.y>4).length}),
+    getRubbleDebug:()=>{
+      const rubble=[...world.rubble,...world.fragments.map(x=>x.mesh),
+        ...world.visualFragments.map(x=>x.mesh)].filter(m=>m&&!m.isDisposed());
+      const pigments=new Set(),origins=new Set();let painted=0,settled=0;
+      for(const mesh of rubble){
+        const data=mesh.getVerticesData('color');
+        if(data?.length){
+          painted++;
+          for(let i=0;i<data.length;i+=16){
+            pigments.add([data[i],data[i+1],data[i+2]].map(v=>Math.round(v*20)).join('/'));
+          }
+        }
+        if(mesh.metadata?.rubbleAppearance?.buildingId!==undefined)
+          origins.add(mesh.metadata.rubbleAppearance.buildingId);
+        if(mesh.metadata?.settled)settled++;
+      }
+      return {total:rubble.length,painted,paintedPercent:rubble.length?Math.round(painted*100/rubble.length):0,
+        pigments:pigments.size,buildingColors:origins.size,settled,
+        groundedFracturePieces:world.groundedFracturePieces,
+        groundContactFractures:world.groundContactFractures,
+        recentlySettled:world.rubble.filter(x=>!x.isDisposed()&&x.metadata?.secondaryGeneration>=1).slice(-280).map(m=>({
+          id:m.uniqueId,y:+m.position.y.toFixed(3),g:m.metadata?.secondaryGeneration||0
+        }))};
+    },
     getBuildings:()=>world.buildings.map(b=>({id:b.id,x:b.floors[0].mesh.position.x,z:b.floors[0].mesh.position.z,
       floors:b.floors.length,topY:b.floors.at(-1).mesh.position.y})),
     getPick:(x,y)=>{const p=surfacePoint(x,y);return p?{x:p.x,y:p.y,z:p.z}:null},
@@ -433,12 +482,14 @@ function bindUI(){
   syncFullscreenUI();
 }
 bindUI();
+window.addEventListener('pagehide',()=>DisasterSystem.closeSharedAudio());
 engine.runRenderLoop(()=>{
   if(!scene)return;
   const dt=Math.min(engine.getDeltaTime()/1000,.065);
   if(!rebuilding&&!paused){
     const scaled=dt*speed;
     simTime+=scaled;
+    world?.beginFrame();
     disasters?.tick(scaled);
     world?.update(scaled);
     if(disasters?.shake>0&&camera){

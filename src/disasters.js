@@ -5,6 +5,7 @@ import {
 import {blowBody,activateWindRubble} from './windPhysics.js';
 import {tornadoDamagePerSecond} from './structuralDamage.js';
 import {meteorPower,meteorScale,meteorWaveDamage,meteorHitDistribution} from './meteorBalance.js';
+import {severity,level,quakeDamage,quakeShake,tsunamiDamage,tsunamiHeight} from './disasterBalance.js';
 const V=(x,y,z)=>new Vector3(x,y,z);
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(a,l,h)=>Math.max(l,Math.min(h,a));
@@ -18,13 +19,18 @@ export class DisasterSystem{
     this.stormCounter=0;this.lightning=0;
     this.meteorHistory=[];this.meteorEvents=[];this.lastMeteorImpact=null;this.windEventStats={lifted:0,carsAirborne:0};
     this.blastWaves=[];this.blastHistory=[];
-    this.volume=.8;this.audioEnabled=true;this.audio=null;
+    this.volume=.8;this.audioEnabled=true;this.audio=DisasterSystem.sharedAudio||null;
+  }
+  static closeSharedAudio(){
+    const context=DisasterSystem.sharedAudio;
+    DisasterSystem.sharedAudio=null;
+    if(context&&context.state!=='closed')context.close().catch(()=>{});
   }
   get strength(){return this.lastStrength||.75}
   deploy(type,position,intensity=.75){
     const p=position.clone();
     p.x=clamp(p.x,-75,75);p.z=clamp(p.z,-75,75);
-    const strength=type==='meteor'?meteorPower(intensity):clamp(intensity,.15,1);
+    const strength=type==='meteor'?meteorPower(intensity):type==='tornado'?clamp(intensity,.15,1):severity(intensity);
     this.lastStrength=strength;
     this.world.impactCount++;
     switch(type){
@@ -33,6 +39,7 @@ export class DisasterSystem{
       case 'quake':this.quake(p,strength);break;
       case 'tsunami':this.tsunami(p,strength);break;
     }
+    this.world.affectLife?.(type,p,strength,15+85*strength,.07);
     this.events.onDeploy?.(type,p,strength);
     return p;
   }
@@ -41,8 +48,10 @@ export class DisasterSystem{
     try{
       const Ctx=window.AudioContext||window.webkitAudioContext;
       if(!Ctx)return;
-      if(!this.audio)this.audio=new Ctx();
-      if(this.audio.state==='suspended')this.audio.resume();
+      if(!DisasterSystem.sharedAudio||DisasterSystem.sharedAudio.state==='closed')
+        DisasterSystem.sharedAudio=new Ctx();
+      this.audio=DisasterSystem.sharedAudio;
+      if(this.audio.state==='suspended')this.audio.resume().catch(()=>{});
       const ctx=this.audio,t=ctx.currentTime;
       const len=kind==='wind'?2.6:kind==='quake'?2.3:1.9;
       const frames=Math.ceil(ctx.sampleRate*len),buf=ctx.createBuffer(1,frames,ctx.sampleRate);
@@ -62,6 +71,7 @@ export class DisasterSystem{
       gain.gain.linearRampToValueAtTime(.22*power*this.volume,t+.08);
       gain.gain.exponentialRampToValueAtTime(.001,t+len);
       src.connect(low);low.connect(gain);gain.connect(ctx.destination);
+      src.onended=()=>{src.disconnect();low.disconnect();gain.disconnect()};
       src.start(t);src.stop(t+len);
     }catch(e){console.warn('Audio unavailable',e)}
   }
@@ -187,6 +197,7 @@ export class DisasterSystem{
     light.intensity=120* Math.max(.4,m.strength);light.range=65;light.diffuse=Color3.FromHexString('#ff9f53');
     this.effects.push({type:'flash',light,age:0,maxAge:.5});
     this.shake=Math.max(this.shake,2.3*m.strength);
+    w.affectLife?.('meteor',p,m.strength,scale.radius,.2);
     this.emitSound('boom',1.2*m.strength);
     this.events.onImpact?.(m.strength);
     m.system.stop();m.system.dispose();if(m.aggregate)m.aggregate.dispose();m.mesh.dispose();
@@ -227,6 +238,7 @@ export class DisasterSystem{
   updateBlastWave(wave,dt,initial=false){
     wave.age+=dt;
     const {config,center,power}=wave;
+    if(dt>0)this.world.affectLife?.('meteor',center,power,config.radius,dt);
     const frontier=initial?Math.min(12,config.radius):config.waveSpeed*wave.age+6;
     // Throttle creation of Havok rigid bodies separately from damage checks:
     // at most two disintegrating floors and eight section updates per frame.
@@ -304,42 +316,55 @@ export class DisasterSystem{
   }
 
   quake(position,strength){
-    const w=this.world,scene=this.scene;
-    const rad=45+strength*77;
-    this.effects.push({type:'quake',age:0,duration:6.5+strength*4,strength,origin:position.clone(),pulse:0,radius:rad});
-    w.fractureAt(V(position.x,8,position.z),rad*.65,.32+strength*.48,'quake');
-    this.waveRing(position,'#efc39b',rad*.7,2.2);
-    for(let j=0;j<12;j++){
-      const angle=rand(0,6.28),length=rand(3,16)*strength,dist=rand(3,42)*strength;
+    const w=this.world,scene=this.scene,k=strength;
+    // Foundations decide structural stability. At level 10 each foundation
+    // receives more than its resistance, and the upper storeys fall by gravity.
+    const candidates=[...w.buildings].sort((a,b)=>
+      Math.hypot(a.x-position.x,a.z-position.z)-Math.hypot(b.x-position.x,b.z-position.z));
+    const targets=candidates.flatMap(b=>[
+      b.floors[0],...b.floors.filter((e,i)=>i>0&&i%3===0)
+    ]).filter(Boolean);
+    const fx={type:'quake',age:0,duration:11.6,strength:k,origin:position.clone(),
+      pulse:0,radius:130,targetIndex:0,targets,broken:0,level:level(k)};
+    this.effects.push(fx);
+    if(k>.8)w.massBlastActive=true; // keep collapse fracture budgets bounded
+    this.waveRing(position,'#efc39b',24+76*k,2.8);
+    if(k>.22)for(let j=0;j<Math.round(2+12*k);j++){
+      const angle=rand(0,6.28),length=rand(2,14)*k,dist=rand(3,66);
       const x=position.x+Math.cos(angle)*dist,z=position.z+Math.sin(angle)*dist;
       const p1=V(clamp(x,-78,78),.43,clamp(z,-78,78));
       const p2=V(clamp(x+Math.cos(angle)*length,-78,78),.43,clamp(z+Math.sin(angle)*length,-78,78));
-      const line=MeshBuilder.CreateTube('seismic fracture',{path:[p1,p2],radius:rand(.07,.24),tessellation:5},scene);
+      const line=MeshBuilder.CreateTube('seismic pavement fissure',{path:[p1,p2],radius:rand(.07,.19),tessellation:5},scene);
       line.material=w.materials.crack;line.isPickable=false;
+      w.trackDecorativeMark(line,null,35);
     }
-    w.createBurst(position,'dust',160,strength);
-    this.emitSound('quake',strength);
-    this.shake=Math.max(this.shake,1.25*strength);
-    this.events.onStatus?.('SEISMIC ACTIVITY','Tectonic instability detected.');
+    w.createBurst(position,'dust',Math.round(8+90*k*k),k);
+    this.emitSound('quake',Math.max(.18,k));
+    this.shake=Math.max(this.shake,quakeShake(k));
+    this.events.onStatus?.('EARTHQUAKE LEVEL '+fx.level+'/10',
+      fx.level<3?'Light tremors — buildings standing':fx.level>=9?'Major structural collapse':'Seismic damage accumulating');
   }
   tsunami(position,strength){
     const scene=this.scene,w=this.world;
-    const waveHeight=9+strength*19;
+    const waveHeight=tsunamiHeight(strength);
     const root=new TransformNode('TSUNAMI WATER MASS',scene);
     const surface=this.material('translucent tidal front','#58a9c9',.58,'#235d83');
     const crest=this.material('whitecaps','#dcf5f1',.65,'#bfe9e5');
     const face=MeshBuilder.CreateBox('tsunami moving wall',{width:4,height:waveHeight,depth:164},scene);
     face.position=V(0,waveHeight*.5,0);face.material=surface;face.parent=root;face.isPickable=false;
-    const lip=MeshBuilder.CreateBox('tsunami frothing crest',{width:6,height:1.7,depth:168},scene);
+    const lip=MeshBuilder.CreateBox('tsunami frothing crest',{width:6,height:Math.max(.5,waveHeight*.08),depth:168},scene);
     lip.position=V(-1.5,waveHeight,0);lip.material=crest;lip.parent=root;lip.isPickable=false;
     const flood=MeshBuilder.CreateBox('water wake',{width:1,height:1.7,depth:164},scene);
     flood.position=V(-1,.15,0);flood.material=this.material('wash water','#69bfd3',.33,'#387c96');
     flood.parent=root;flood.isPickable=false;
     root.position=V(-85,0,0);
     this.effects.push({type:'tsunami',root,face,lip,flood,age:0,duration:8+strength*4,
-      strength,origin:position.clone(),lastX:-87,lastSpray:0});
-    this.emitSound('wind',strength);
-    this.events.onStatus?.('EXTREME WATER SURGE','A tidal wall is entering the district.');
+      strength,origin:position.clone(),lastX:-87,lastSpray:0,
+      waveHeight,damaged:new Set(),broken:0,level:level(strength)});
+    if(strength>.8)w.massBlastActive=true;
+    this.emitSound('wind',Math.max(.2,strength));
+    this.events.onStatus?.('TSUNAMI LEVEL '+level(strength)+'/10',
+      level(strength)<3?'A shallow surge is arriving':'Rising coastal flood waters');
   }
 
   // Swept sphere vs the intact floor AABBs. Catches collisions even if a heavy
@@ -447,6 +472,7 @@ export class DisasterSystem{
       mote.mesh.scaling.setAll(1+Math.sin(mote.phase*2)*.15);
     }
     const center=fx.root.position, radius=14+24*k;
+    w.affectLife?.('tornado',center,k,radius,dt);
     // Buildings have structural resistance: weak tornadoes cannot detach
     // load-bearing floors. Sustained powerful winds gradually fatigue the frame.
     for(const e of w.structures){
@@ -460,21 +486,33 @@ export class DisasterSystem{
       const tangent=V(-dz/Math.max(1,dist)*(8+28*k*k),5+16*k*k,dx/Math.max(1,dist)*(8+28*k*k));
       w.damageStructure(e,damage,tangent,p,'tornado');
     }
-    for(const part of w.fragments){
-      if(!part.aggregate)continue;
-      const p=part.mesh.getAbsolutePosition();
-      blowBody(part.aggregate.body,p,center,radius,k,dt,part.kind==='wall'?'wall':'rubble',fx);
-    }
-    for(const part of w.debris){
-      if(!part.aggregate)continue;
-      blowBody(part.aggregate.body,part.mesh.position,center,radius,k,dt,'rubble',fx);
-    }
-    for(const prop of w.props){
-      if(prop.type==='crane'||!prop.aggregate)continue;
-      const p=prop.mesh.getAbsolutePosition();
-      if(blowBody(prop.aggregate.body,p,center,radius,k,dt,'car',fx)&&p.y>2.2){
-        w.windCarsLifted.add(prop.mesh.uniqueId);
+    // Havok velocity reads/writes are expensive. Sample the field at 18–24Hz,
+    // but keep ordinary rendering and vortex motion running every frame.
+    fx.physicsAccumulator=(fx.physicsAccumulator||0)+dt;
+    const windStep=w.mobile?.055:.042;
+    if(fx.physicsAccumulator>=windStep){
+      const step=Math.min(.12,fx.physicsAccumulator);
+      fx.physicsAccumulator=0;
+      for(const part of w.fragments){
+        if(!part.aggregate)continue;
+        const p=part.mesh.getAbsolutePosition();
+        if(Math.abs(p.x-center.x)>radius||Math.abs(p.z-center.z)>radius)continue;
+        blowBody(part.aggregate.body,p,center,radius,k,step,part.kind==='wall'?'wall':'rubble',fx);
       }
+      for(const part of w.debris){
+        if(!part.aggregate)continue;
+        const p=part.mesh.position;
+        if(Math.abs(p.x-center.x)>radius||Math.abs(p.z-center.z)>radius)continue;
+        blowBody(part.aggregate.body,p,center,radius,k,step,'rubble',fx);
+      }
+      for(const prop of w.props){
+        if(prop.type==='crane'||!prop.aggregate)continue;
+        const p=prop.mesh.getAbsolutePosition();
+        if(Math.abs(p.x-center.x)>radius||Math.abs(p.z-center.z)>radius)continue;
+        if(blowBody(prop.aggregate.body,p,center,radius,k,step,'car',fx)&&p.y>2.2)
+          w.windCarsLifted.add(prop.mesh.uniqueId);
+      }
+      w.windPhysicsUpdates=(w.windPhysicsUpdates||0)+1;
     }
     // Settled panels and slabs were static performance proxies. Re-enable Havok
     // physics for nearby loose debris instead of leaving it nailed to the ground.
@@ -519,24 +557,31 @@ export class DisasterSystem{
   }
 
   tickQuake(fx,dt){
-    const w=this.world,rad=fx.radius,k=fx.strength,p=fx.origin;
+    const w=this.world,k=fx.strength,p=fx.origin,impact=quakeDamage(k);
     fx.pulse+=dt;
-    if(fx.pulse>.58){
+    // Stable buildings lose health gradually. At level 10 all building
+    // foundations are struck; upper storeys collapse after support loss.
+    if(fx.pulse>.12&&fx.targetIndex<fx.targets.length){
       fx.pulse=0;
-      const jitter=V(p.x+rand(-rad*.45,rad*.45),rand(3,15),p.z+rand(-rad*.45,rad*.45));
-      w.fractureAt(jitter,rad*.47,k*.9,'quake');
-      if(Math.random()>.45)w.createBurst(V(jitter.x,.8,jitter.z),'dust',85,.4+k*.4);
-      for(const part of w.fragments){
+      for(let i=0;i<3&&fx.targetIndex<fx.targets.length;i++){
+        const entry=fx.targets[fx.targetIndex++];
+        if(!entry||entry.active||impact<=0)continue;
+        const pos=entry.mesh.getAbsolutePosition();
+        const dist=Math.hypot(pos.x-p.x,pos.z-p.z);
+        const loss=impact*(k>.95?1:.62+.38*(1-dist/145));
+        const impulse=V(rand(-18,18)*k,Math.max(1,8*k),rand(-18,18)*k);
+        if(w.damageStructure(entry,loss,impulse,pos,'quake'))fx.broken++;
+      }
+      if(k>.30&&Math.random()<k*.5)
+        w.createBurst(V(p.x+rand(-34,34),.8,p.z+rand(-34,34)),'dust',Math.round(20+50*k),.3+k);
+      for(const part of w.fragments.slice(0,35)){
+        if(!part.aggregate)continue;
         const pos=part.mesh.getAbsolutePosition();
-        if(pos.subtract(p).length()<rad)part.aggregate.body.applyImpulse(V(rand(-8,8)*k,rand(0,7)*k,rand(-8,8)*k),pos);
+        part.aggregate.body.applyImpulse(V(rand(-5,5)*k,rand(0,4)*k,rand(-5,5)*k),pos);
       }
-      for(const item of w.props){
-        const pos=item.mesh.position;
-        if(pos.subtract(p).length()<rad)item.aggregate.body.applyImpulse(V(rand(-12,12),6*k,rand(-12,12)),pos);
-      }
-      this.shake=Math.max(this.shake,.6*k);
+      w.affectLife?.('quake',p,k,160,.12);
     }
-    this.shake=Math.max(this.shake,.25*k);
+    this.shake=Math.max(this.shake,quakeShake(k));
   }
 
   tickTsunami(fx,dt){
@@ -544,36 +589,65 @@ export class DisasterSystem{
     const front=-85+170*clamp(fx.age/fx.duration,0,1);
     fx.root.position.x=front;
     fx.face.rotation.z=Math.sin(fx.age*2)*.03;
-    fx.lip.position.y=(9+k*19)+Math.sin(fx.age*5)*.6;
+    fx.lip.position.y=fx.waveHeight+Math.sin(fx.age*5)*.6;
     fx.flood.scaling.x=Math.max(1,(front+85)/2);
     fx.flood.position.x=-(front+85)/2;
-    // A wide surge transfers momentum to every mass it encounters.
-    for(const e of w.structures){
-      if(e.active)continue;
-      const pos=e.mesh.getAbsolutePosition();
-      if(Math.abs(pos.x-front)<4.5 && pos.y<21+k*9 && Math.random()<dt*(2+6*k)){
-        w.release(e,V((18+30*k)*.7,4+rand(3,12)*k,rand(-10,10)),pos);
+    let released=0;
+    for(const entry of w.structures){
+      if(entry.active||fx.damaged.has(entry))continue;
+      const pos=entry.mesh.getAbsolutePosition();
+      // Swept strip: a frame-time spike cannot make the wave skip a building.
+      if(pos.x<Math.min(fx.lastX,front)-5.5||pos.x>front+5.5||
+         pos.y-fx.waveHeight>2)continue;
+      const damage=tsunamiDamage(k,pos.y);
+      if(damage<=0)continue;
+      // Mark only once damage was scheduled or applied. Queue structural
+      // failure when dynamic bodies cannot be created in this frame.
+      fx.damaged.add(entry);w.tsunamiSectionHits++;
+      const momentum=V(15+50*k*k,2+11*k,rand(-9,9)*k);
+      if(w.damageStructure(entry,damage,momentum,pos,'water')){released++;fx.broken++}
+      else if(entry.health<=0){fx.deferred=(fx.deferred||0)+1;w.tsunamiDeferred++}
+    }
+    fx.lastX=front;
+    // Strong water carries loose rigid bodies; small tides don't launch cars.
+    for(const prop of w.props){
+      if(prop.type!=='car'||!prop.aggregate)continue;
+      const p=prop.mesh.position;
+      if(Math.abs(p.x-front)<9){
+        const force=80*k*k+1600*Math.pow(k,3);
+        prop.aggregate.body.applyForce(V(force,150*k*k,rand(-130,130)*k*k),p);
       }
     }
-    for(const prop of w.props){
-      const p=prop.mesh.position;
-      if(Math.abs(p.x-front)<9)prop.aggregate.body.applyForce(V(2100*k,230*k,rand(-300,300)),p);
-    }
-    for(const part of w.fragments){
+    for(const part of w.fragments.slice(0,100)){
+      if(!part.aggregate)continue;
       const p=part.mesh.getAbsolutePosition();
-      if(Math.abs(p.x-front)<7 && p.y<18+k*13)part.aggregate.body.applyForce(V(740*k,200*k,rand(-160,160)),p);
+      if(Math.abs(p.x-front)<7&&p.y<fx.waveHeight+1)
+        part.aggregate.body.applyForce(V(90+740*k*k,130*k*k,rand(-100,100)*k),p);
     }
+    w.affectLife?.('tsunami',V(front,0,0),k,8+8*k,dt);
     fx.lastSpray+=dt;
-    if(fx.lastSpray>.26){
+    if(fx.lastSpray>.36){
       fx.lastSpray=0;
-      for(let n=0;n<3;n++)w.createBurst(V(front,2,rand(-73,73)),'water',45,.55+k*.35);
+      for(let n=0;n<Math.max(1,Math.round(1+2*k));n++)
+        w.createBurst(V(front,Math.min(fx.waveHeight*.3,3),rand(-73,73)),
+          'water',Math.round(12+35*k),.25+k*.6);
     }
-    this.shake=Math.max(this.shake,.13*k);
+    this.shake=Math.max(this.shake,.08+.6*k*k);
   }
 
   endEffect(fx){
+    if((fx.type==='quake'||fx.type==='tsunami')&&fx.strength>.8){
+      const activeDisasters=this.effects.some(e=>e!==fx&&
+        (e.type==='quake'||e.type==='tsunami')&&e.strength>.8);
+      if(!activeDisasters&&this.blastWaves.every(w=>w.power<=.65))
+        this.world.massBlastActive=false;
+    }
     if(fx.type==='tornado'){fx.root.dispose(false,false);fx.cone.dispose();for(const r of fx.rings)r.mesh.dispose();for(const c of fx.clouds)c.mesh.dispose()}
-    else if(fx.type==='tsunami'){fx.root.dispose(false,false);fx.face.dispose();fx.lip.dispose();fx.flood.dispose()}
+    else if(fx.type==='tsunami'){
+      const materials=new Set([fx.face.material,fx.lip.material,fx.flood.material]);
+      fx.root.dispose(false,false);fx.face.dispose();fx.lip.dispose();fx.flood.dispose();
+      for(const material of materials)material?.dispose();
+    }
     else if(fx.type==='flash'){fx.light.dispose()}
     else if(fx.type==='lightning'){fx.bolt.material.dispose();fx.bolt.dispose();fx.light.dispose()}
   }

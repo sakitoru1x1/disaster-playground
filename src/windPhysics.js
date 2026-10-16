@@ -72,7 +72,7 @@ export function activateWindRubble(world,center,radius,intensity,limit=4){
   for(let i=world.rubble.length-1;i>=0&&lifted<limit;i--){
     if(world.fragments.length>=world.maxFragmentBodies)break;
     const mesh=world.rubble[i];
-    if(!mesh?.isEnabled()||mesh.isDisposed())continue;
+    if(!mesh?.isEnabled()||mesh.isDisposed()||mesh.metadata?.pendingVisualFracture)continue;
     const p=mesh.getAbsolutePosition();
     const distance=Math.hypot(p.x-center.x,p.z-center.z);
     if(distance>radius*.86||p.y>5.8)continue;

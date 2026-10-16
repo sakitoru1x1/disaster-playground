@@ -1,6 +1,7 @@
 import {MeshBuilder, PhysicsAggregate, PhysicsShapeType, Vector3, VertexBuffer, VertexData} from '@babylonjs/core';
 import {chooseSlabSplitCount,partitionSlab} from './slabs.js';
-import {queueSecondaryFracture} from './secondaryFracture.js';
+import {attachSecondaryCollision} from './secondaryFracture.js';
+import {facadeAppearance,paintFragment} from './rubbleAppearance.js';
 
 // Destructible modular buildings: panels, columns, and individually fractured slabs.
 // Havok handles rigid-body motion and collisions, not concrete stress propagation.
@@ -51,9 +52,11 @@ function spawnPhysical(world,entry,origin,local,size,kind,face,impulse,slabId=nu
   const material=kind==='slab'?world.materials.concrete:
     kind==='column'?accent:pick(entry.mesh.material,accent);
   const shard=jaggedBlock(world.scene,size,material,'fractured '+kind);
+  shard.metadata={kind,fragmentSize:size.slice()};
+  paintFragment(world,shard,facadeAppearance(world,entry,kind));
   shard.position=origin.add(local);
   shard.rotation=V(rand(-.055,.055),rand(-.07,.07),rand(-.055,.055));
-  shard.metadata={width:size[0],depth:size[2],kind,slabId,fragmentSize:size.slice(),buildingId:entry.building.id,storey:entry.storey};
+  shard.metadata={...shard.metadata,width:size[0],depth:size[2],kind,slabId,fragmentSize:size.slice(),buildingId:entry.building.id,storey:entry.storey};
   if(face)makeWindowShard(world,shard,face,
     face==='front'||face==='back'?size[0]:size[2],size[1]);
   // Keep enough shadow casting to ground fragments without filling the shadow atlas.
@@ -73,14 +76,7 @@ function spawnPhysical(world,entry,origin,local,size,kind,face,impulse,slabId=nu
   aggregate.body.setAngularVelocity(V(rand(-1.6,1.6),rand(-2,2),rand(-1.6,1.6)));
   const fragment={mesh:shard,aggregate,age:0,kind,slabId,building:entry.building,secondaryQueued:false,secondaryGeneration:0,fallStartY:shard.position.y};
   world.fragments.push(fragment);
-  if((kind==='slab'||kind==='wall')&&[...size].sort((a,b)=>b-a)[0]*[...size].sort((a,b)=>b-a)[1]>3.3){
-    aggregate.body.setCollisionCallbackEnabled(true);
-    const observable=aggregate.body.getCollisionObservable();
-    fragment.collisionObservable=observable;
-    fragment.collisionObserver=observable.add(info=>{
-      if(info.type==='COLLISION_STARTED')queueSecondaryFracture(world,fragment,info);
-    });
-  }
+  if(kind==='slab'||kind==='wall')attachSecondaryCollision(world,fragment);
   world.activeBodies++;
   return true;
 }
@@ -89,13 +85,16 @@ function spawnVisualRubble(world,entry,origin,local,size,kind,impulse,slabId=nul
   if(world.visualFragments.length>=world.maxVisualFragments)return false;
   const material=kind==='slab'?world.materials.concrete:entry.mesh.material;
   const shard=jaggedBlock(world.scene,size,material,'visually simulated falling '+kind);
+  shard.metadata={kind,fragmentSize:size.slice()};
+  paintFragment(world,shard,facadeAppearance(world,entry,kind));
   shard.position=origin.add(local);
   shard.rotation=V(rand(-.09,.09),rand(-.19,.19),rand(-.09,.09));
-  shard.metadata={kind,slabId,visualFalling:true};
+  shard.metadata={...shard.metadata,kind,slabId,fragmentSize:size.slice(),visualFalling:true,secondaryGeneration:0};
   // Visual fallback starts at its actual height, and falls rather than teleporting.
   const velocity=impulse.scale(rand(.018,.055)).add(V(rand(-1.8,1.8),rand(-1,2),rand(-1.8,1.8)));
   world.visualFragments.push({
     mesh:shard,velocity,angular:V(rand(-1.2,1.2),rand(-2,2),rand(-1.2,1.2)),
+    kind,secondaryGeneration:0,fallStartY:shard.position.y,
     floorY:.42+size[1]*.5,settled:false
   });
   return true;
@@ -156,7 +155,9 @@ export function fractureStorey(world,entry,impulse,impactAt){
       // Max both budgets: retain a single visible piece of the floor in place.
       // It is intentionally NOT teleported away.
       const mesh=jaggedBlock(world.scene,size,world.materials.concrete,'retained slab shard');
-      mesh.position=origin.add(local);mesh.metadata={kind:'slab',slabId,retained:true};
+      mesh.metadata={kind:'slab',slabId,fragmentSize:size.slice(),retained:true};
+      paintFragment(world,mesh,facadeAppearance(world,entry,'slab'));
+      mesh.position=origin.add(local);
       world.rubble.push(mesh);staticParts++;
     }
   }
