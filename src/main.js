@@ -377,6 +377,13 @@ async function createGame(){
           id:m.uniqueId,y:+m.position.y.toFixed(3),g:m.metadata?.secondaryGeneration||0
         }))};
     },
+    getVisualStyle:()=>({showcaseCount:world.showcaseCount,
+      facades:scene.meshes.filter(m=>m.name==='showcase facade cornices and pilasters').length,
+      contactShadows:scene.meshes.filter(m=>m.name==='showcase ambient contact').length,
+      plazaBatches:scene.meshes.filter(m=>m.name==='showcase central plaza details').length,
+      asphaltTexture:!!world.materials.road.diffuseTexture,
+      pavementTexture:!!world.materials.sidewalk.diffuseTexture,
+      sun:world.sun.intensity,ambient:world.hemi.intensity}),
     getBuildings:()=>world.buildings.map(b=>({id:b.id,x:b.floors[0].mesh.position.x,z:b.floors[0].mesh.position.z,
       floors:b.floors.length,topY:b.floors.at(-1).mesh.position.y})),
     getPick:(x,y)=>{const p=surfacePoint(x,y);return p?{x:p.x,y:p.y,z:p.z}:null},

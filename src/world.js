@@ -9,6 +9,7 @@ import {splitOnCollision,splitVisualOnLanding,queueSecondaryFracture,canVisually
 import {populateCityLife,affectCityLife,updateCityLife} from './cityLife.js';
 import {planCity} from './cityLayout.js';
 import {makeFacadeWindows,compactSettledRubble} from './perfGeometry.js';
+import {applyVisualArtDirection,addShowcaseFloor,addShowcasePlaza,addShowcaseContact,addShowcaseEntrance} from './visualPass.js';
 import {sectionResistance,meteorDirectDamage,meteorBlastDamage,tornadoDamagePerSecond} from './structuralDamage.js';
 import {meteorHitDistribution,meteorScale} from './meteorBalance.js';
 
@@ -92,8 +93,10 @@ export class CityWorld {
     sun.shadowMinZ=1;
     sun.shadowMaxZ=240;
     this.makeMaterials();
+    applyVisualArtDirection(this);
     this.makeSky();
     this.makeTerrain();
+    addShowcasePlaza(this);
     this.makeDistricts();
     this.makeProps();
     populateCityLife(this);
@@ -243,12 +246,14 @@ export class CityWorld {
     t.update();
     const material=new StandardMaterial('city glass panels',this.scene);
     material.diffuseTexture=t;material.emissiveTexture=t;
-    material.diffuseColor=hex('#a3c9d2');material.emissiveColor=hex('#6c7d81');
+    material.diffuseColor=hex('#c5e1ed');material.emissiveColor=hex('#303d44');
+    material.specularPower=64;
     material.useAlphaFromDiffuseTexture=true;material.backFaceCulling=false;material.specularColor=hex('#b9cdd1');
     return material;
   }
 
   makeDistricts(){
+    this.showcaseCount=0;
     this.windowMat=this.makeWindowTexture();
     this.windowMaster=MeshBuilder.CreatePlane('window geometry source',{size:1,sideOrientation:Mesh.DOUBLESIDE},this.scene);
     this.windowMaster.material=this.windowMat;this.windowMaster.isVisible=false;this.windowMaster.isPickable=false;
@@ -265,12 +270,14 @@ export class CityWorld {
 
   makeBuilding(x,z,i,j,siteSize=11){
     const index=this.buildings.length;
+    const showcase=this.showcaseCount<4&&Math.hypot(x,z)<42;
+    if(showcase)this.showcaseCount++;
     const style=Math.floor(rand(0,7)),modern=Math.random()>.55;
     const floors=Math.floor(rand(3,8))+((i===2||j===2)?1:0);
     const width=siteSize*rand(.91,1.03),depth=siteSize*rand(.88,1.03),fh=3.6;
     const offsX=siteSize>=10?rand(-.45,.45):rand(-.13,.13);
     const offsZ=siteSize>=10?rand(-.45,.45):rand(-.13,.13);
-    const b={id:index,x,z,style,name:choice(['Harbor','Sunset','North','Pacific','Crescent','Beacon','Meridian','Atlas','Orion'])+' '+(index+1),floors:[],destroyed:false};
+    const b={id:index,x,z,style,showcase,name:choice(['Harbor','Sunset','North','Pacific','Crescent','Beacon','Meridian','Atlas','Orion'])+' '+(index+1),floors:[],destroyed:false};
     this.buildings.push(b);
     for(let n=0;n<floors;n++){
       const isTop=n===floors-1;
@@ -285,6 +292,7 @@ export class CityWorld {
       const baseBand=null;
       // One UV-mapped mesh for all four sides instead of four scene objects.
       makeFacadeWindows(this.scene,mesh,this.windowMat,w,d,fh);
+      if(showcase)addShowcaseFloor(this,mesh,w,d,fh,isTop,style);
       if(isTop){
         const roof=this.box('roof cap',[w+.65,.25,d+.65],V(0,fh*.5+.02,0),this.materials.dark,mesh);
         if(index%3===0){
@@ -301,8 +309,10 @@ export class CityWorld {
       entry.aggregate=new PhysicsAggregate(mesh,PhysicsShapeType.BOX,{mass:0,friction:.84,restitution:.08},this.scene);
       b.floors.push(entry);this.structures.push(entry);this.totalFloors++;
     }
+    if(showcase)addShowcaseContact(this,x+offsX,z+offsZ,width,depth);
     const door=this.box('building lobby',[Math.min(3,width*.4),2.7,.15],V(x+offsX,.4+1.2,z+offsZ+depth*.5+.1),this.materials.glass);
     const numbers=this.box('lobby marquee',[Math.min(4,width*.5),.23,.2],V(x+offsX,3,z+offsZ+depth*.5+.16),this.materials.lamp);
+    if(showcase)addShowcaseEntrance(this,b.floors[0].mesh,width,depth,fh,style);
   }
 
   createTree(x,z,scale=1){
