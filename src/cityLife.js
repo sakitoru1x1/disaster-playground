@@ -3,6 +3,7 @@ import {
   PhysicsShapeType,PhysicsMotionType
 } from '@babylonjs/core';
 import {terrainDisplacement} from './terrainDamage.js';
+import {citizenIdentity,updateCitizenRoutine,nextTowardNode} from './citizenRoutines.js';
 import {
   pedestrianNode,choosePedestrianNext,
   positionOnRoute,trafficHeading,SIDEWALK_COORDS
@@ -10,7 +11,6 @@ import {
 
 const V=(x,y,z)=>new Vector3(x,y,z);
 const rand=(a,b)=>a+(b-a)*Math.random();
-const pick=a=>a[Math.floor(Math.random()*a.length)];
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const PED_BASE_Y=.215;
 const tempPosition=V(0,0,0);
@@ -38,35 +38,50 @@ export function populateCityLife(world){
 
   // A connected grid of safe footpaths around the 26m city blocks.
   // Pedestrians cross at intersections and turn instead of standing in place.
-  const count=world.mobile?22:Math.max(40,Math.min(55,Math.round(world.buildingCount*1.8)));
+  // Citizen geometry is instanced: 165 people are only a handful of distinct
+  // shapes/materials instead of >1100 separate meshes and draw calls.
+  const masters={head:MeshBuilder.CreateSphere('citizen head master',{diameter:.43,segments:7},world.scene),
+    leg:MeshBuilder.CreateBox('citizen leg master',{width:.18,height:.69,depth:.20},world.scene),
+    shirts:m.pedShirts.map((material,index)=>{
+      const mesh=MeshBuilder.CreateBox('citizen shirt master '+index,{width:.6,height:.83,depth:.33},world.scene);
+      mesh.material=material;return mesh;
+    }),
+    arms:m.pedShirts.map((material,index)=>{
+      const mesh=MeshBuilder.CreateBox('citizen arm master '+index,{width:.15,height:.7,depth:.2},world.scene);
+      mesh.material=material;return mesh;
+    })};
+  masters.head.material=m.pedHeads;masters.leg.material=m.pedPants;
+  world.citizenMasters=[masters.head,masters.leg,...masters.shirts,...masters.arms];
+  world.citizenMasters.forEach(master=>{master.isPickable=false;master.isVisible=false});
+  const count=world.mobile?72:210;
   for(let i=0;i<count;i++){
-    const nodeI=Math.floor(Math.random()*SIDEWALK_COORDS.length);
-    const nodeJ=Math.floor(Math.random()*SIDEWALK_COORDS.length);
+    const identity=citizenIdentity(i),[nodeI,nodeJ]=identity.home;
     const here=pedestrianNode(nodeI,nodeJ);
-    const target=choosePedestrianNext(nodeI,nodeJ,null,null,false);
-    const root=new TransformNode('city pedestrian '+i,world.scene);
+    const target=nextTowardNode(identity.home,identity.work);
+    const root=new TransformNode('citizen '+i+' '+identity.occupation,world.scene);
     root.position=V(here.x,PED_BASE_Y,here.z);
-    const jacket=pick(m.pedShirts);
-    const torso=MeshBuilder.CreateBox('person torso',{width:.6,height:.83,depth:.33},world.scene);
-    torso.parent=root;torso.position.y=1.20;torso.material=jacket;
-    const head=MeshBuilder.CreateSphere('person head',{diameter:.43,segments:7},world.scene);
-    head.parent=root;head.position.y=1.94;head.material=m.pedHeads;
+    const shirt=Math.floor(i*13.17)%masters.shirts.length;
+    const torso=masters.shirts[shirt].createInstance('person torso '+i);
+    torso.parent=root;torso.position.y=1.20;
+    const head=masters.head.createInstance('person head '+i);
+    head.parent=root;head.position.y=1.94;
     const legs=[],arms=[];
     for(const side of [-1,1]){
-      const leg=MeshBuilder.CreateBox('person leg',{width:.18,height:.69,depth:.20},world.scene);
-      leg.parent=root;leg.position=V(side*.18,.42,0);leg.material=m.pedPants;legs.push(leg);
-      const arm=MeshBuilder.CreateBox('person arm',{width:.15,height:.7,depth:.2},world.scene);
-      arm.parent=root;arm.position=V(side*.42,1.18,0);arm.material=jacket;arms.push(arm);
+      const leg=masters.leg.createInstance('person leg '+i);
+      leg.parent=root;leg.position=V(side*.18,.42,0);legs.push(leg);
+      const arm=masters.arms[shirt].createInstance('person arm '+i);
+      arm.parent=root;arm.position=V(side*.42,1.18,0);arms.push(arm);
     }
     const help=MeshBuilder.CreatePlane('injured HELP signal',
       {width:1.55,height:.72},world.scene);
     help.parent=root;help.position.y=2.95;help.billboardMode=Mesh.BILLBOARDMODE_ALL;
     help.material=m.helpSign;help.isPickable=false;help.setEnabled(false);
     root.getChildMeshes().forEach(mesh=>mesh.isPickable=false);
-    const pace=rand(1.3,2.2);
     world.civilians.push({root,x:here.x,z:here.z,state:'walking',panic:0,exposure:0,
-      threat:V(here.x+3,0,here.z+3),walkPhase:rand(0,7),speed:pace,
-      node:[nodeI,nodeJ],target,previous:null,legs,arms,help,walked:0});
+      threat:V(here.x+3,0,here.z+3),walkPhase:rand(0,7),speed:identity.speed,
+      node:[nodeI,nodeJ],target,previous:null,legs,arms,help,walked:0,
+      identity,routineGoal:null,pathGoal:null,routineActivity:'breakfast',
+      waitTime:0,socialUntil:0,lastGreeting:-100,visible:true});
   }
 }
 
@@ -190,13 +205,14 @@ export function affectCityLife(world,kind,center,power,radius,dt){
   }
 }
 function chooseNewPedestrianNode(person){
-  const [i,j]=person.node;
   person.previous=person.node;
   person.node=person.target;
-  person.target=choosePedestrianNext(person.node[0],person.node[1],
-    person.previous,person.threat,person.panic>0);
+  person.target=person.panic>0||!person.identity
+    ?choosePedestrianNext(person.node[0],person.node[1],
+      person.previous,person.threat,person.panic>0)
+    :nextTowardNode(person.node,person.routineGoal||person.identity.home,person.previous);
 }
-function walkPedestrian(person,dt){
+function walkPedestrian(person,dt,time=0){
   if(person.state==='dead'||person.state==='injured')return;
   if(person.state==='sheltering'&&person.shelterTime>0){
     person.shelterTime-=dt;
@@ -206,6 +222,35 @@ function walkPedestrian(person,dt){
   }
   person.root.rotation.z=0;
   const root=person.root, running=person.panic>0;
+  // No teleporting: resume today's home/work/shopping itinerary after danger.
+  if(person.identity&&!running){
+    updateCitizenRoutine(person,time);
+    if(person.routineGoal&&(!person.pathGoal||
+       !person.pathGoal.every((v,i)=>v===person.routineGoal[i]))){
+      person.pathGoal=[...person.routineGoal];
+      person.target=nextTowardNode(person.node,person.routineGoal,person.previous);
+    }
+    const destination=person.routineGoal||person.node;
+    const arrived=person.node[0]===destination[0]&&person.node[1]===destination[1]&&
+      Math.hypot(root.position.x-SIDEWALK_COORDS[destination[0]],
+        root.position.z-SIDEWALK_COORDS[destination[1]])<.3;
+    if(arrived){
+      person.waitTime=(person.waitTime||0)+dt;
+      person.target=person.node;
+      person.routineActivity=person.socialUntil>time?'socializing':
+        person.routineActivity;
+      // Life does not freeze at an office doorway: small head turns and
+      // greeting gestures make stationary NPCs look occupied.
+      const idle=time*1.5+person.walkPhase;
+      root.rotation.y=.22*Math.sin(idle*.28);
+      person.arms[0].rotation.x=Math.sin(idle)*(person.socialUntil>time?.48:.13);
+      person.arms[1].rotation.x=-person.arms[0].rotation.x;
+      person.legs[0].rotation.x=person.legs[1].rotation.x=0;
+      root.position.y=PED_BASE_Y;
+      return;
+    }
+    person.waitTime=0;
+  }
   if(person.role==='medic'&&person.medicalTarget){
     const target=person.medicalTarget.root.position,dx=target.x-root.position.x,dz=target.z-root.position.z;
     const distance=Math.hypot(dx,dz);
@@ -216,10 +261,15 @@ function walkPedestrian(person,dt){
   }
   if(running)person.panic=Math.max(0,person.panic-dt);
   person.state=running?'fleeing':'walking';
+  if(person.identity&&person.panic<=0&&running){
+    person.target=nextTowardNode(person.node,person.routineGoal||person.identity.home);
+  }
   const pace=person.speed*(running?2.8:1);
   let remaining=dt*pace;
   let attempts=0;
   while(remaining>0&&attempts++<3){
+    if(person.identity&&!running&&person.routineGoal&&
+       person.node[0]===person.routineGoal[0]&&person.node[1]===person.routineGoal[1])break;
     const nx=SIDEWALK_COORDS[person.target[0]],
       nz=SIDEWALK_COORDS[person.target[1]];
     const dx=nx-root.position.x,dz=nz-root.position.z;
@@ -298,10 +348,39 @@ export function updateTraffic(world,dt){
     t.lastPosition.copyFrom(tempPosition);
   }
 }
+export {cityClock,citizenStats} from './citizenRoutines.js';
 export function updateCityLife(world,dt){
   updateTraffic(world,dt);
+  world.nextSocialScan=(world.nextSocialScan||0)-dt;
+  if(world.nextSocialScan<=0){
+    world.nextSocialScan=1.25;
+    const cells=new Map();
+    for(const p of world.civilians){
+      if(!p.identity||p.state!=='walking'||p.panic>0||p.socialUntil>world.time||
+         p.waitTime<.6||world.time-p.lastGreeting<11)continue;
+      const x=p.root.position.x,z=p.root.position.z;
+      const key=Math.round(x/3)+','+Math.round(z/3);
+      const other=cells.get(key);
+      if(other&&Math.hypot(x-other.root.position.x,z-other.root.position.z)<2.2){
+        p.socialUntil=other.socialUntil=world.time+2.5;
+        p.lastGreeting=other.lastGreeting=world.time;
+        p.routineActivity=other.routineActivity='socializing';
+        cells.delete(key);
+      }else cells.set(key,p);
+    }
+  }
+  const cam=world.scene?.activeCamera;
+  const walkView=cam?.name==='street level spectator'&&cam?.position;
+  for(const p of world.civilians){
+    // Frustum culling is assisted only in walk mode. Do not cull everyone
+    // when the orbit camera views the entire city from high altitude.
+    if(!p.root||!p.identity)continue;
+    const far=walkView&&Math.hypot(p.root.position.x-cam.position.x,
+      p.root.position.z-cam.position.z)>(world.mobile?68:110);
+    if(p.visible===!!far){p.visible=!far;p.root.setEnabled(!far)}
+  }
   for(const person of world.civilians){
-    walkPedestrian(person,dt);
+    walkPedestrian(person,dt,world.time);
     const displacement=terrainDisplacement(person.root.position.x,person.root.position.z,
       world.terrainCraters||[]);
     // Walking, injured, sheltering and dead citizens must all remain on the

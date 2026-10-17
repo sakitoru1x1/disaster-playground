@@ -15,7 +15,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "test:expansion": "node tests/cityExpansion.test.mjs",
     "test:districts": "node tests/districtBuildings.test.mjs",
-    "test:horizon": "node tests/cameraHorizon.test.mjs"
+    "test:horizon": "node tests/cameraHorizon.test.mjs",
+    "test:citizens": "node tests/citizenRoutines.test.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "^9.31.0",

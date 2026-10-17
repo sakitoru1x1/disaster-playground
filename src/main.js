@@ -6,7 +6,7 @@ import HavokPhysics from '@babylonjs/havok';
 import {CityWorld} from './world.js';
 import {DisasterSystem} from './disasters.js';
 import {WalkController} from './walkController.js';
-import {pauseCityTraffic} from './cityLife.js';
+import {pauseCityTraffic,cityClock,citizenStats} from './cityLife.js';
 import {CITY_HALF_SIZE} from './cityLayout.js';
 import {initializeTerrain} from './terrainDamage.js';
 import {PhysicsViewer} from '@babylonjs/core/Debug/physicsViewer';
@@ -398,6 +398,8 @@ async function createGame(){
     rubbleBatchSavedDraws:world.rubbleBatchSavedDraws,
     cascadeDeferred:world.cascadeDeferred,fracturesThisFrame:world.fracturesThisFrame,
     civilians:world.civilians.length,civilianDeaths:world.civilianDeaths,
+    citizenRoutine:citizenStats(world.civilians),
+    citizenClock:cityClock(world.time),visibleCitizens:world.civilians.filter(p=>p.visible!==false).length,
     pedestriansWalking:world.civilians.filter(p=>p.state==='walking').length,
     pedestrianPositions:world.civilians.map(p=>({x:+p.root.position.x.toFixed(2),z:+p.root.position.z.toFixed(2),state:p.state})),
     pedestriansFleeing:world.civilians.filter(p=>p.state==='fleeing').length,
@@ -513,6 +515,14 @@ async function createGame(){
       trees:world.trees.slice(0,12).map(t=>({x:t.root.position.x,y:t.root.position.y,z:t.root.position.z})),
       people:world.civilians.slice(0,15).map(p=>({x:p.root.position.x,y:p.root.position.y,z:p.root.position.z}))
     }),
+    getCitizenDebug:()=>({count:world.civilians.length,
+      visible:world.civilians.filter(p=>p.visible!==false).length,
+      instancedMeshes:world.civilians.reduce((n,p)=>n+p.legs.length+p.arms.length+2,0),
+      renderedInstances:scene.getActiveMeshes().data.slice(0,scene.getActiveMeshes().length).filter(m=>m?.name.startsWith('person ')).length,
+      groups:citizenStats(world.civilians),clock:cityClock(world.time),
+      samples:world.civilians.slice(0,10).map(p=>({x:p.root.position.x,z:p.root.position.z,
+        activity:p.routineActivity,goal:p.routineGoal,enabled:p.root.isEnabled(),
+        torsoVisible:p.root.getChildMeshes().find(m=>m.name.startsWith('person torso'))?.isVisible}))}),
     getWalk:()=>walk?.info(),
     getPlayerState:()=>walk?.survival.dieState(),
     respawnPlayer:()=>respawnPlayer(),
