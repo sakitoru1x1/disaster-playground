@@ -1,12 +1,13 @@
 import {
   MeshBuilder, StandardMaterial, PBRMaterial, Color3, Color4, Vector3, Texture,
-  DynamicTexture, PhysicsAggregate, PhysicsShapeType, BallAndSocketConstraint, Quaternion, TransformNode, ShadowGenerator,
+  DynamicTexture, PhysicsAggregate, PhysicsShapeType, PhysicsMotionType, BallAndSocketConstraint, Quaternion, TransformNode, ShadowGenerator,
   HemisphericLight, DirectionalLight, GlowLayer, PointLight, ParticleSystem,
   Animation, VertexBuffer, Mesh, Matrix
 } from '@babylonjs/core';
 import {fractureStorey} from './fracture.js';
 import {splitOnCollision,splitVisualOnLanding,queueSecondaryFracture,canVisuallyFracture} from './secondaryFracture.js';
 import {populateCityLife,affectCityLife,updateCityLife} from './cityLife.js';
+import {trafficRoutes,positionOnRoute,trafficHeading} from './cityMotion.js';
 import {planCity} from './cityLayout.js';
 import {makeFacadeWindows,compactSettledRubble} from './perfGeometry.js';
 import {applyVisualArtDirection,addShowcaseFloor,addShowcasePlaza,addShowcaseContact,addShowcaseEntrance} from './visualPass.js';
@@ -333,17 +334,24 @@ export class CityWorld {
 
   makeProps(){
     const m=this.materials;
-    for(let i=0;i<Math.min(21,Math.max(2,Math.round(this.buildingCount*.65)));i++){
-      const x=choice([-39,-13,13,39])+rand(-1,1),z=rand(-70,70);
-      const car=this.box('parked vehicle',[3.65,1.15,1.8],V(x,1,z),choice(m.chassis),null,true);
-      const cabin=this.box('vehicle windows',[1.8,.75,1.55],V(-.15,.72,0),m.carDark,car);
-      for(const p of [-1,1])for(const q of [-1,1]){
-        const wheel=this.cylinder('vehicle wheel',.7,.24,V(p*1.2,-.51,q*.92),m.dark,12,car);
+    // Cars follow low-cost road waypoints with ANIMATED Havok colliders.
+    // Colliding disasters switch an affected car to DYNAMIC rigid-body motion.
+    const numberOfCars=this.mobile?12:Math.min(20,Math.max(13,Math.round(this.buildingCount*.85)));
+    for(const planned of trafficRoutes(numberOfCars)){
+      const {route,distance,speed}=planned;
+      const p=positionOnRoute(route,distance),heading=trafficHeading(route,distance);
+      const car=this.box('moving city vehicle',[3.65,1.15,1.8],V(p.x,1,p.z),choice(m.chassis),null,true);
+      car.rotationQuaternion=Quaternion.FromEulerAngles(0,heading,0);
+      this.box('vehicle windows',[1.8,.75,1.55],V(-.15,.72,0),m.carDark,car);
+      for(const side of [-1,1])for(const wheelSide of [-1,1]){
+        const wheel=this.cylinder('vehicle wheel',.7,.24,V(side*1.2,-.51,wheelSide*.92),m.dark,12,car);
         wheel.rotation.x=Math.PI/2;
       }
-      const a=new PhysicsAggregate(car,PhysicsShapeType.BOX,{mass:11,friction:.7,restitution:.16},this.scene);
-      a.body.setLinearDamping(.45);a.body.setAngularDamping(.5);
-      this.props.push({mesh:car,aggregate:a,type:'car',active:true});
+      const aggregate=new PhysicsAggregate(car,PhysicsShapeType.BOX,{mass:11,friction:.7,restitution:.16},this.scene);
+      aggregate.body.setLinearDamping(.45);aggregate.body.setAngularDamping(.5);
+      aggregate.body.setMotionType(PhysicsMotionType.ANIMATED);
+      this.props.push({mesh:car,aggregate,type:'car',active:true,
+        traffic:{route,distance,speed,state:'driving',heading,lastPosition:V(p.x,1,p.z)}});
     }
     for(let i=0;i<Math.min(26,Math.max(6,Math.round(this.buildingCount*.95)));i++){
       const x=choice([-39,-13,13,39])+choice([-4.8,4.8]);

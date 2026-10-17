@@ -6,6 +6,7 @@ import HavokPhysics from '@babylonjs/havok';
 import {CityWorld} from './world.js';
 import {DisasterSystem} from './disasters.js';
 import {WalkController} from './walkController.js';
+import {pauseCityTraffic} from './cityLife.js';
 import {PhysicsViewer} from '@babylonjs/core/Debug/physicsViewer';
 import {ShadowGenerator} from '@babylonjs/core/Lights/Shadows/shadowGenerator';
 import './ui.css';
@@ -182,6 +183,7 @@ function deployAt(p=targetPoint){
 }
 function togglePause(){
   paused=!paused;
+  if(world)pauseCityTraffic(world,paused);
   // Babylon continues rendering; its physics integration is paused by scaling timestep.
   if(scene?.getPhysicsEngine)scene.getPhysicsEngine()?.setTimeStep(paused?0.00001:(1/60)*speed);
   $('#pauseIcon').textContent=paused?'▶':'Ⅱ';
@@ -383,7 +385,10 @@ async function createGame(){
     rubbleBatchSavedDraws:world.rubbleBatchSavedDraws,
     cascadeDeferred:world.cascadeDeferred,fracturesThisFrame:world.fracturesThisFrame,
     civilians:world.civilians.length,civilianDeaths:world.civilianDeaths,
+    pedestriansWalking:world.civilians.filter(p=>p.state==='walking').length,
+    pedestrianPositions:world.civilians.map(p=>({x:+p.root.position.x.toFixed(2),z:+p.root.position.z.toFixed(2),state:p.state})),
     pedestriansFleeing:world.civilians.filter(p=>p.state==='fleeing').length,
+    carsDriving:world.props.filter(p=>p.type==='car'&&p.traffic?.state==='driving').length,
     carsWrecked:world.carsWrecked,
     quakeEffects:disasters.effects.filter(e=>e.type==='quake').map(e=>({level:e.level,broken:e.broken,targetIndex:e.targetIndex,targets:e.targets.length})),
     tsunamiEffects:disasters.effects.filter(e=>e.type==='tsunami').map(e=>({level:e.level,broken:e.broken,hit:e.damaged.size,deferred:e.deferred||0})),
