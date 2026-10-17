@@ -16,7 +16,10 @@
     "test:expansion": "node tests/cityExpansion.test.mjs",
     "test:districts": "node tests/districtBuildings.test.mjs",
     "test:horizon": "node tests/cameraHorizon.test.mjs",
-    "test:citizens": "node tests/citizenRoutines.test.mjs"
+    "test:citizens": "node tests/citizenRoutines.test.mjs",
+    "test:behavior": "node tests/cityLifeBehavior.test.mjs",
+    "test:disasters": "node tests/disasterCoverage.test.mjs",
+    "test:browser": "node tests/browserSmoke.cjs"
   },
   "dependencies": {
     "@babylonjs/core": "^9.31.0",

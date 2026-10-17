@@ -452,7 +452,9 @@ export class CityWorld {
   // section. Damage never makes an intact storey fall until resistance is gone.
   damageStructure(entry,amount,impulse=V(0,0,0),impactAt=null,source='impact'){
     if(!entry||entry.active||amount<=0)return false;
-    if(entry.building?.district)activateDistrictBuilding(this,entry.building);
+    // Distant district buildings retain their single cheap static collider
+    // while only being scratched. Activate floor-by-floor Havok physics only
+    // when a storey actually needs to fracture in release().
     entry.health=Math.max(0,entry.health-amount);
     entry.damageTaken+=amount;
     const ratio=entry.health/entry.maxHealth;
@@ -719,7 +721,14 @@ export class CityWorld {
   }
   affectLife(kind,center,power,radius,dt){affectCityLife(this,kind,center,power,radius,dt)}
   damageTerrain(x,z,k,kind){return applyCrater(this,x,z,k,kind)}
-  integrity(){return Math.max(0,Math.round(100*(1-this.brokenFloors/this.totalFloors)))}
+  integrity(){
+    if(!this.structures.length)return 100;
+    // Cracked but still standing floors must count toward city damage;
+    // the old counter showed 100% even with critically weakened buildings.
+    const remaining=this.structures.reduce((sum,e)=>sum+(e.active?0:
+      Math.max(0,Math.min(1,e.health/Math.max(1,e.maxHealth)))),0);
+    return Math.max(0,Math.min(100,Math.round(100*remaining/this.structures.length)));
+  }
   update(dt){
     this.time+=dt;
     updateCityLife(this,dt);

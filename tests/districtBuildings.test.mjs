@@ -39,4 +39,11 @@ assert.equal(CityWorld.prototype.findBuildingAt.call(world,0,0,0),null);
 fakeBuilding.floors.at(-1).active=true;
 const lower=DisasterSystem.prototype.findMeteorContact.call(engine,V(104,80,78),V(104,-2,78),1.8);
 assert(lower?.entry.storey===4,'Meteor sweep must continue to intact floors after roof destruction');
-console.log('REAL_DISTRICT_BUILDINGS_PASS: 5 districts, 12+ styles, separate floors, roof/wall contact and precise targeting');
+const cosmetic={active:false,building:{district:'harbor',physicsActivated:false},
+ health:100,maxHealth:100,damageTaken:0,damageMarks:0};
+const touched=CityWorld.prototype.damageStructure.call({},cosmetic,10);
+assert.equal(touched,false,'Light scratches should not destroy the storey');
+assert.equal(cosmetic.health,90);
+assert.equal(cosmetic.building.physicsActivated,false,
+ 'A cosmetic scratch should not replace a district building with multiple Havok colliders');
+console.log('REAL_DISTRICT_BUILDINGS_PASS: full meteor collision and lazy physical activation');

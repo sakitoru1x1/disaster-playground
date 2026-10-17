@@ -212,7 +212,7 @@ function chooseNewPedestrianNode(person){
       person.previous,person.threat,person.panic>0)
     :nextTowardNode(person.node,person.routineGoal||person.identity.home,person.previous);
 }
-function walkPedestrian(person,dt,time=0){
+export function walkPedestrian(person,dt,time=0){
   if(person.state==='dead'||person.state==='injured')return;
   if(person.state==='sheltering'&&person.shelterTime>0){
     person.shelterTime-=dt;
@@ -225,6 +225,7 @@ function walkPedestrian(person,dt,time=0){
   // No teleporting: resume today's home/work/shopping itinerary after danger.
   if(person.identity&&!running){
     updateCitizenRoutine(person,time);
+    person.routineActivity=person.socialUntil>time?'socializing':person.scheduleActivity;
     if(person.routineGoal&&(!person.pathGoal||
        !person.pathGoal.every((v,i)=>v===person.routineGoal[i]))){
       person.pathGoal=[...person.routineGoal];
@@ -237,8 +238,6 @@ function walkPedestrian(person,dt,time=0){
     if(arrived){
       person.waitTime=(person.waitTime||0)+dt;
       person.target=person.node;
-      person.routineActivity=person.socialUntil>time?'socializing':
-        person.routineActivity;
       // Life does not freeze at an office doorway: small head turns and
       // greeting gestures make stationary NPCs look occupied.
       const idle=time*1.5+person.walkPhase;

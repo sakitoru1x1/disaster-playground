@@ -72,9 +72,10 @@ export function updateCitizenRoutine(person,time){
  const goal=routine.goal;
  const previous=person.routineGoal;
  const changed=!previous||goal[0]!==previous[0]||goal[1]!==previous[1]||
-  person.routineActivity!==routine.activity;
+  person.scheduleActivity!==routine.activity;
  if(changed){
   person.routineGoal=clone(goal);
+  person.scheduleActivity=routine.activity;
   person.routineActivity=routine.activity;
   person.waitTime=0;
  }

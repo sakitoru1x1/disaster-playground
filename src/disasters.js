@@ -7,6 +7,7 @@ import {tornadoDamagePerSecond} from './structuralDamage.js';
 import {meteorPower,meteorScale,meteorWaveDamage,meteorHitDistribution} from './meteorBalance.js';
 import {severity,level,quakeDamage,quakeShake,tsunamiDamage,tsunamiHeight} from './disasterBalance.js';
 import {CITY_HALF_SIZE} from './cityLayout.js';
+import {releaseTrafficCar} from './cityLife.js';
 const V=(x,y,z)=>new Vector3(x,y,z);
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(a,l,h)=>Math.max(l,Math.min(h,a));
@@ -321,13 +322,13 @@ export class DisasterSystem{
     const w=this.world,scene=this.scene,k=strength;
     // Foundations decide structural stability. At level 10 each foundation
     // receives more than its resistance, and the upper storeys fall by gravity.
-    const candidates=[...w.buildings].sort((a,b)=>
+    const candidates=[...w.buildings,...(w.districtBuildings||[])].sort((a,b)=>
       Math.hypot(a.x-position.x,a.z-position.z)-Math.hypot(b.x-position.x,b.z-position.z));
     const targets=candidates.flatMap(b=>[
       b.floors[0],...b.floors.filter((e,i)=>i>0&&i%3===0)
     ]).filter(Boolean);
     const fx={type:'quake',age:0,duration:11.6,strength:k,origin:position.clone(),
-      pulse:0,radius:130,targetIndex:0,targets,broken:0,level:level(k)};
+      pulse:0,radius:CITY_HALF_SIZE*1.45,targetIndex:0,targets,broken:0,level:level(k)};
     this.effects.push(fx);
     if(k>.63)w.damageTerrain(position.x,position.z,k,'quake');
     if(k>.8)w.massBlastActive=true; // keep collapse fracture budgets bounded
@@ -335,8 +336,8 @@ export class DisasterSystem{
     if(k>.22)for(let j=0;j<Math.round(2+12*k);j++){
       const angle=rand(0,6.28),length=rand(2,14)*k,dist=rand(3,66);
       const x=position.x+Math.cos(angle)*dist,z=position.z+Math.sin(angle)*dist;
-      const p1=V(clamp(x,-78,78),.43,clamp(z,-78,78));
-      const p2=V(clamp(x+Math.cos(angle)*length,-78,78),.43,clamp(z+Math.sin(angle)*length,-78,78));
+      const p1=V(clamp(x,-CITY_HALF_SIZE+7,CITY_HALF_SIZE-7),.43,clamp(z,-CITY_HALF_SIZE+7,CITY_HALF_SIZE-7));
+      const p2=V(clamp(x+Math.cos(angle)*length,-CITY_HALF_SIZE+7,CITY_HALF_SIZE-7),.43,clamp(z+Math.sin(angle)*length,-CITY_HALF_SIZE+7,CITY_HALF_SIZE-7));
       const line=MeshBuilder.CreateTube('seismic pavement fissure',{path:[p1,p2],radius:rand(.07,.19),tessellation:5},scene);
       line.material=w.materials.crack;line.isPickable=false;
       w.trackDecorativeMark(line,null,35);
@@ -459,8 +460,8 @@ export class DisasterSystem{
     // Slow lateral wandering around target.
     // Gentle drift so lifted objects have time to orbit the funnel, instead
     // of chasing a center that runs away from them.
-    fx.root.position.x=clamp(fx.origin.x+Math.sin(t*.23+fx.noise)*6,-70,70);
-    fx.root.position.z=clamp(fx.origin.z+Math.cos(t*.22+fx.noise)*5,-70,70);
+    fx.root.position.x=clamp(fx.origin.x+Math.sin(t*.23+fx.noise)*6,-CITY_HALF_SIZE+10,CITY_HALF_SIZE-10);
+    fx.root.position.z=clamp(fx.origin.z+Math.cos(t*.22+fx.noise)*5,-CITY_HALF_SIZE+10,CITY_HALF_SIZE-10);
     fx.cone.rotation.y+=dt*.8;
     for(const ring of fx.rings){
       ring.phase+=dt*(1.5+ring.height*.09);
@@ -512,6 +513,8 @@ export class DisasterSystem{
         if(prop.type==='crane'||!prop.aggregate)continue;
         const p=prop.mesh.getAbsolutePosition();
         if(Math.abs(p.x-center.x)>radius||Math.abs(p.z-center.z)>radius)continue;
+        if(prop.type==='car'&&k>.34&&Math.hypot(p.x-center.x,p.z-center.z)<radius*.82)
+          releaseTrafficCar(prop);
         if(blowBody(prop.aggregate.body,p,center,radius,k,step,'car',fx)&&p.y>2.2)
           w.windCarsLifted.add(prop.mesh.uniqueId);
       }
@@ -571,7 +574,8 @@ export class DisasterSystem{
         if(!entry||entry.active||impact<=0)continue;
         const pos=entry.mesh.getAbsolutePosition();
         const dist=Math.hypot(pos.x-p.x,pos.z-p.z);
-        const loss=impact*(k>.95?1:.62+.38*(1-dist/145));
+        const falloff=1-Math.min(1,dist/(CITY_HALF_SIZE*2));
+        const loss=impact*(k>.95?1:.30+.70*falloff);
         const impulse=V(rand(-18,18)*k,Math.max(1,8*k),rand(-18,18)*k);
         if(w.damageStructure(entry,loss,impulse,pos,'quake'))fx.broken++;
       }
@@ -617,6 +621,7 @@ export class DisasterSystem{
       if(prop.type!=='car'||!prop.aggregate)continue;
       const p=prop.mesh.position;
       if(Math.abs(p.x-front)<9){
+        if(k>.34)releaseTrafficCar(prop);
         const force=80*k*k+1600*Math.pow(k,3);
         prop.aggregate.body.applyForce(V(force,150*k*k,rand(-130,130)*k*k),p);
       }
@@ -632,7 +637,7 @@ export class DisasterSystem{
     if(fx.lastSpray>.36){
       fx.lastSpray=0;
       for(let n=0;n<Math.max(1,Math.round(1+2*k));n++)
-        w.createBurst(V(front,Math.min(fx.waveHeight*.3,3),rand(-73,73)),
+        w.createBurst(V(front,Math.min(fx.waveHeight*.3,3),rand(-CITY_HALF_SIZE+6,CITY_HALF_SIZE-6)),
           'water',Math.round(12+35*k),.25+k*.6);
     }
     this.shake=Math.max(this.shake,.08+.6*k*k);
