@@ -1,5 +1,5 @@
 import {
-  MeshBuilder,Vector3,Quaternion,TransformNode,PhysicsAggregate,
+  MeshBuilder,Vector3,Quaternion,TransformNode,DynamicTexture,Texture,Mesh,PhysicsAggregate,
   PhysicsShapeType,PhysicsMotionType
 } from '@babylonjs/core';
 import {
@@ -24,6 +24,16 @@ export function populateCityLife(world){
   m.pedPants=world.mat('citizen trousers','#323c4d');
   m.wreck=world.mat('vehicle impact soot','#34363a');
   m.stain=world.mat('small ground injury stain','#77332d',{alpha:.58,disableLighting:true});
+  const helpTexture=new DynamicTexture('city SOS sign',{width:128,height:64},world.scene,false);
+  helpTexture.hasAlpha=true;
+  const ctx=helpTexture.getContext();ctx.clearRect(0,0,128,64);
+  ctx.fillStyle='#ba463ee7';ctx.fillRect(0,0,128,64);
+  ctx.font='bold 33px sans-serif';ctx.textAlign='center';
+  ctx.fillStyle='#fff3e5';ctx.fillText('HELP!',64,44);helpTexture.update();
+  m.helpSign=world.mat('injured civilian aid signal','#ffffff',
+    {disableLighting:true,backFaceCulling:false});
+  m.helpSign.diffuseTexture=helpTexture;
+  m.helpSign.useAlphaFromDiffuseTexture=true;
 
   // A connected grid of safe footpaths around the 26m city blocks.
   // Pedestrians cross at intersections and turn instead of standing in place.
@@ -47,17 +57,29 @@ export function populateCityLife(world){
       const arm=MeshBuilder.CreateBox('person arm',{width:.15,height:.7,depth:.2},world.scene);
       arm.parent=root;arm.position=V(side*.42,1.18,0);arm.material=jacket;arms.push(arm);
     }
+    const help=MeshBuilder.CreatePlane('injured HELP signal',
+      {width:1.55,height:.72},world.scene);
+    help.parent=root;help.position.y=2.95;help.billboardMode=Mesh.BILLBOARDMODE_ALL;
+    help.material=m.helpSign;help.isPickable=false;help.setEnabled(false);
     root.getChildMeshes().forEach(mesh=>mesh.isPickable=false);
     const pace=rand(1.3,2.2);
     world.civilians.push({root,x:here.x,z:here.z,state:'walking',panic:0,exposure:0,
       threat:V(here.x+3,0,here.z+3),walkPhase:rand(0,7),speed:pace,
-      node:[nodeI,nodeJ],target,previous:null,legs,arms,walked:0});
+      node:[nodeI,nodeJ],target,previous:null,legs,arms,help,walked:0});
   }
 }
 
+function injureCivilian(world,p){
+  if(p.state==='dead'||p.state==='injured')return;
+  p.state='injured';p.panic=0;p.medicalTarget=null;p.exposure=0;
+  p.help?.setEnabled(true);
+  p.root.rotation.z=-.44;
+  p.root.position.y=.15;
+}
 function killCivilian(world,p){
   if(p.state==='dead')return;
   p.state='dead';p.panic=0;world.civilianDeaths++;
+  p.help?.setEnabled(false);
   p.root.rotation.z=rand(-1.44,-1.13);
   p.root.rotation.y=rand(-2,2);
   p.root.position.y=.4;
@@ -117,7 +139,7 @@ function damageCar(world,car,power,direction){
 export function affectCityLife(world,kind,center,power,radius,dt){
   const strength=clamp(power,0,1);
   for(const p of world.civilians){
-    if(p.state==='dead')continue;
+    if(p.state==='dead'||p.state==='injured')continue;
     const x=p.root.position.x,z=p.root.position.z;
     const distance=kind==='quake'?0:kind==='tsunami'?Math.abs(x-center.x):
       Math.hypot(x-center.x,z-center.z);
@@ -126,11 +148,20 @@ export function affectCityLife(world,kind,center,power,radius,dt){
     p.threat=V(center.x,0,center.z);
     p.panic=Math.max(p.panic,Math.min(8,2+6*strength));
     p.state='fleeing';
+    // Some civilians take cover during moderate tremors instead of
+    // running blindly into traffic; severe events trigger evacuation.
+    if(strength>.3&&strength<.62&&p.root.uniqueId%3===0){
+      p.state='sheltering';p.panic=0;p.shelterTime=Math.max(p.shelterTime||0,2+strength*4);
+    }
     if(strength>.52){
       const lethality=Math.pow((strength-.52)/.48,1.4)*
         (kind==='quake'?.8:kind==='tsunami'?.9:.6+.4*falloff);
       p.exposure+=dt*lethality*3.0;
-      if(p.exposure>.32+((p.root.uniqueId*17)%15)*.035)killCivilian(world,p);
+      if(p.exposure>.42+((p.root.uniqueId*17)%15)*.042){
+        // Most victims can be rescued; very close/high-energy exposure may be fatal.
+        if(strength>.90&&(p.root.uniqueId%5===0))killCivilian(world,p);
+        else injureCivilian(world,p);
+      }
     }
   }
   for(const car of world.props){
@@ -165,8 +196,23 @@ function chooseNewPedestrianNode(person){
     person.previous,person.threat,person.panic>0);
 }
 function walkPedestrian(person,dt){
-  if(person.state==='dead')return;
+  if(person.state==='dead'||person.state==='injured')return;
+  if(person.state==='sheltering'&&person.shelterTime>0){
+    person.shelterTime-=dt;
+    person.root.position.y=.07;
+    person.legs[0].rotation.x=person.legs[1].rotation.x=.4;
+    return;
+  }
+  person.root.rotation.z=0;
   const root=person.root, running=person.panic>0;
+  if(person.role==='medic'&&person.medicalTarget){
+    const target=person.medicalTarget.root.position,dx=target.x-root.position.x,dz=target.z-root.position.z;
+    const distance=Math.hypot(dx,dz);
+    if(distance>.1){const step=Math.min(distance,person.speed*2.2*dt);
+      root.position.x+=dx/distance*step;root.position.z+=dz/distance*step;
+      root.rotation.y=Math.atan2(dx,dz);}
+    return;
+  }
   if(running)person.panic=Math.max(0,person.panic-dt);
   person.state=running?'fleeing':'walking';
   const pace=person.speed*(running?2.8:1);

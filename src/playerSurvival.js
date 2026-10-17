@@ -1,5 +1,6 @@
 import {MeshBuilder, PhysicsAggregate, PhysicsShapeType, Vector3} from '@babylonjs/core';
 import {meteorScale} from './meteorBalance.js';
+import {PhysicalRagdoll} from './physicalRagdoll.js';
 
 // Player is one real Havok rigid body. All impulses and collisions happen in
 // the existing world; health / drowning / balance are gameplay rules.
@@ -17,6 +18,7 @@ export class PlayerSurvival {
     this.health=100;
     this.dead=false;
     this.body=null;
+    this.ragdoll=null;
     this.mesh=null;
     this.inAir=false;
     this.knockdown=0;
@@ -37,6 +39,7 @@ export class PlayerSurvival {
     this.onDeath=null;
   }
   spawn(x,z){
+    this.ragdoll?.dispose();this.ragdoll=null;
     this.removeBody();
     this.mesh=MeshBuilder.CreateCapsule('PLAYER Havok capsule',
       {height:HEIGHT,radius:RADIUS,tessellation:8,capSubdivisions:4},this.scene);
@@ -58,7 +61,13 @@ export class PlayerSurvival {
     this.aggregate?.dispose();this.aggregate=null;this.body=null;
     this.mesh?.dispose();this.mesh=null;
   }
-  dispose(){this.removeBody()}
+  dispose(){this.removeBody();this.ragdoll?.dispose();this.ragdoll=null}
+  activateRagdoll(){
+    if(this.ragdoll||!this.body||!this.scene||!this.mesh?.getScene)return;
+    const at=this.mesh.position.clone(),velocity=this.body.getLinearVelocity().clone();
+    this.ragdoll=new PhysicalRagdoll(this.scene,at,velocity);
+    this.removeBody();
+  }
   takeDamage(amount,cause='impact',knock=0){
     if(this.dead||amount<=0)return;
     this.health=clamp(this.health-amount,0,100);
@@ -72,6 +81,9 @@ export class PlayerSurvival {
       this.knockdown=10;
       this.body?.setLinearVelocity(V(0,0,0));
       this.onDeath?.(cause);
+      this.activateRagdoll();
+    }else if(knock>.70){
+      this.activateRagdoll();
     }
   }
   impulse(x,y,z){
@@ -206,6 +218,20 @@ export class PlayerSurvival {
     }
   }
   step(dt,disasters,{forward=0,right=0,yaw=0,sprint=false}={}){
+    if(this.ragdoll){
+      this.ragdoll.update(dt);
+      const p=this.ragdoll.torso.position;
+      this.camera.position.set(p.x-Math.sin(this.walk.yaw)*5,
+        p.y+2.5,p.z-Math.cos(this.walk.yaw)*5);
+      this.camera.setTarget(p.add(V(0,.45,0)));
+      this.knockdown=Math.max(0,this.knockdown-dt);
+      if(!this.dead&&this.ragdoll.age>1.6){
+        this.ragdoll.dispose();this.ragdoll=null;
+        this.spawn(p.x,p.z);
+        this.camera.rotation.set(this.walk.pitch,this.walk.yaw,0);
+      }
+      return;
+    }
     if(!this.body)return;
     dt=clamp(dt,0,.065);
     this.simTime+=dt;
@@ -260,7 +286,7 @@ export class PlayerSurvival {
   dieState(){return {health:+this.health.toFixed(2),dead:this.dead,knockdown:+this.knockdown.toFixed(2),
     drowning:+this.drowning.toFixed(2),lastHurt:this.lastHurt,events:this.events,
     impacts:this.impacts,grounded:this.grounded,velocity:this.body?.getLinearVelocity().asArray()||[0,0,0],
-    physicalBody:!!this.body};}
+    physicalBody:!!this.body,ragdollParts:this.ragdoll?.parts.length||0};}
   revive(x,z){
     this.health=100;this.dead=false;this.knockdown=0;this.drowning=0;
     this.shake=0;this.cooldown=0;this.lastHurt='none';

@@ -187,6 +187,7 @@ export class DisasterSystem{
     if(this.meteorHistory.length>16)this.meteorHistory.shift();
     wave.impactLog=this.meteorHistory.at(-1);
     if(wave.finished)this.finishBlastLog(wave);
+    if(strength>.14)w.damageTerrain(p.x,p.z,strength,'meteor');
     w.tossDebris(V(p.x,Math.max(2,p.y*.38),p.z),Math.round(2+14*strength),.22+.78*strength);
     this.world.createBurst(p,'fire',scale.particles,.7+strength*1.3);
     this.world.createBurst(ground,'dust',Math.round(scale.particles*.85),.6+strength);
@@ -327,6 +328,7 @@ export class DisasterSystem{
     const fx={type:'quake',age:0,duration:11.6,strength:k,origin:position.clone(),
       pulse:0,radius:130,targetIndex:0,targets,broken:0,level:level(k)};
     this.effects.push(fx);
+    if(k>.63)w.damageTerrain(position.x,position.z,k,'quake');
     if(k>.8)w.massBlastActive=true; // keep collapse fracture budgets bounded
     this.waveRing(position,'#efc39b',24+76*k,2.8);
     if(k>.22)for(let j=0;j<Math.round(2+12*k);j++){

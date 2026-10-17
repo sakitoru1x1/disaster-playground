@@ -1,0 +1,23 @@
+
+/* Compact civic recovery status stays outside the HUD on touch devices. */
+.city-progress{display:none}
+.mobile-device .city-progress{
+ display:block;position:absolute;left:max(10px,env(safe-area-inset-left));
+ top:calc(var(--mobile-header,46px) + 9px);z-index:7;pointer-events:none;
+ max-width:42vw;background:#0a2330cb;color:#e8d4ad;
+ padding:6px 9px;border:1px solid #e4bc8069;border-radius:5px;
+ font:700 9px 'Segoe UI',sans-serif;letter-spacing:.55px;line-height:1.4;
+}
+.mobile-device.walk-mode .city-progress{top:calc(var(--mobile-header,46px) + 9px)}
+/* Survivor assistance action: present only inside the existing mobile walk UI. */
+#walkHelpBtn{display:none}
+.mobile-device.walk-mode #walkHelpBtn{
+ display:block;position:absolute;z-index:12;pointer-events:auto;
+ right:max(26px,env(safe-area-inset-right));bottom:calc(var(--mobile-footer,58px) + 154px);
+ width:82px;height:46px;border:1px solid #b3dcca;
+ border-radius:13px;background:#246d65dd;color:#e4fff7;
+ font-size:12px;font-weight:800;letter-spacing:1px;touch-action:manipulation;
+}
+@media (max-height:690px){
+ .mobile-device.walk-mode #walkHelpBtn{bottom:calc(var(--mobile-footer,58px) + 134px)}
+}

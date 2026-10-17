@@ -7,12 +7,14 @@ import {CityWorld} from './world.js';
 import {DisasterSystem} from './disasters.js';
 import {WalkController} from './walkController.js';
 import {pauseCityTraffic} from './cityLife.js';
+import {initializeTerrain} from './terrainDamage.js';
 import {PhysicsViewer} from '@babylonjs/core/Debug/physicsViewer';
 import {ShadowGenerator} from '@babylonjs/core/Lights/Shadows/shadowGenerator';
 import './ui.css';
 import './mobile.css';
 import './walk.css';
 import './playerSurvival.css';
+import './survivorHelp.css';
 
 const $=selector=>document.querySelector(selector);
 const $$=selector=>[...document.querySelectorAll(selector)];
@@ -119,6 +121,11 @@ function updateStats(dt){
   $('#fps').textContent=Math.round(engine.getFps());
   $('#mobileIntegrity').textContent=integrity+'%';
   $('#mobileFps').textContent=Math.round(engine.getFps());
+  if(world.progression){
+    const c=world.progression.stats();
+    $('#cityProgress').textContent='DAY '+c.day+' · RESCUED '+c.rescued+
+      ' · REBUILT '+c.rebuilt+(c.constructed?' · NEW '+c.constructed:'');
+  }
   $('#damage').textContent=(100-integrity)+'%';
   $('#clock').textContent=timestamp();
 }
@@ -130,6 +137,7 @@ function setMobileMenu(open){
 function callbacks(){
   return {
     onDeploy:(kind,p,strength)=>{
+      world?.progression?.event(kind);
       logEvent(labels[kind],Math.round(strength*100)+'% intensity | '+Math.round(p.x)+', '+Math.round(p.z));
       toast(icons[kind]+' '+labels[kind],descriptions[kind]);
       setStatus(labels[kind]+' DEPLOYED','Real-time physics simulation in progress');
@@ -233,6 +241,11 @@ function walkTarget(){
   return point;
 }
 function walkStrike(){if(walk?.enabled&&!walk.survival.dead)deployAt(walkTarget())}
+function walkHelp(){
+  if(!walk?.enabled||walk.survival.dead)return;
+  const helped=world?.progression?.helpNearest(walk.camera.position);
+  toast(helped?'SURVIVOR RESCUED':'NO INJURED PERSON NEARBY',helped?'Good work!':'Get within 3 metres of an injured citizen');
+}
 function respawnPlayer(){
   if(!walk?.enabled)return;
   walk.respawn();
@@ -339,9 +352,7 @@ async function createGame(){
   };
   $('#walkDeath').classList.remove('is-visible');
   document.documentElement.style.setProperty('--player-hurt','0');
-  const groundPhysics=new PhysicsAggregate(world.ground,PhysicsShapeType.BOX,{mass:0,friction:.93,restitution:.06},scene);
-  const islandPhysics=new PhysicsAggregate(scene.getMeshByName('island slab'),PhysicsShapeType.BOX,{mass:0,friction:.92},scene);
-  world.groundPhysics=groundPhysics;world.islandPhysics=islandPhysics;
+  initializeTerrain(world);
   $('#loadingText').textContent='CALIBRATING VISUAL EFFECTS...';
   pipeline=null;
   try{
@@ -369,7 +380,8 @@ async function createGame(){
   setTimeout(()=>$('#loading').classList.add('is-done'),330);
   window.disasterDebug={
     getPerf:()=>({fps:engine.getFps(),drawCalls:engine._drawCalls?.current??null,meshes:scene.meshes.length,activeMeshes:scene.getActiveMeshes().length,activeIndices:scene.getActiveIndices(),hardwareScale:engine.getHardwareScalingLevel(),width:engine.getRenderWidth(),height:engine.getRenderHeight(),shadows:world.shadow.getShadowMap()?.getSize()?.width||0,batching:world.staticBatchStats,mobile:mobileDevice,quality:mobileDevice?(qualityHigh?'SHARP':'MOBILE'):(qualityHigh?'ULTRA':'PERF')}),
-    getState:()=>({fps:engine.getFps(),buildings:world.buildings.length,requestedBuildings:buildingCount,floors:world.totalFloors,broken:world.brokenFloors,
+    getState:()=>({terrainDeformations:world.terrainDeformations,craters:world.terrainCraters.length,
+      ...world.progression.stats(),fps:engine.getFps(),buildings:world.buildings.length,requestedBuildings:buildingCount,floors:world.totalFloors,broken:world.brokenFloors,
     activeBodies:world.activeBodies,impacts:world.impactCount,integrity:world.integrity(),activeEffects:disasters.effects.length,craneJointActive:!!world.crane,fragments:world.fragments.length,shadowMapSize:world.shadow.getShadowMap()?.getSize().width,pendingFailures:world.pendingFailures.length,slabFractures:world.slabFractures.length,slabSplitCounts:world.slabFractures.slice(-30).map(s=>s.requestedParts),slabPhysicalParts:world.slabFractures.reduce((a,s)=>a+s.physicalParts,0),slabStaticParts:world.slabFractures.reduce((a,s)=>a+s.staticParts,0),
     fallingVisual:world.visualFragments.length,
     retainedShards:scene.meshes.filter(m=>m.metadata?.retained).length,
@@ -493,7 +505,19 @@ async function createGame(){
     getPlayerState:()=>walk?.survival.dieState(),
     respawnPlayer:()=>respawnPlayer(),
     // Developer-only disaster damage calibration; not exposed in the game UI.
-    damagePlayerForTest:(amount)=>walk?.survival.takeDamage(amount,'test'),
+    damagePlayerForTest:(amount)=>walk?.survival.takeDamage(amount,'test',1.2),
+    simulateCityGrowthForTest:()=>world.progression.tryBuildNewBlock(world.time+100),
+    simulateRecoveryForTest:()=>{
+      const pending=world.pendingFailures;
+      world.pendingFailures=[];
+      world.progression.lastDisaster=world.time-40;
+      world.progression.nextRepair=0;
+      const brokenBefore=world.brokenFloors;
+      world.progression.update(0,{effects:[],blastWaves:[]});
+      const brokenAfter=world.brokenFloors;
+      world.pendingFailures=pending;
+      return {...world.progression.stats(),brokenBefore,brokenAfter};
+    },
     toggleWalk:()=>toggleWalkMode(),
     getBuildings:()=>world.buildings.map(b=>({id:b.id,x:b.floors[0].mesh.position.x,z:b.floors[0].mesh.position.z,
       floors:b.floors.length,topY:b.floors.at(-1).mesh.position.y})),
@@ -556,6 +580,7 @@ function bindUI(){
   $('#cameraBtn').addEventListener('click',cycleCamera);
   $('#walkBtn').addEventListener('click',toggleWalkMode);
   $('#walkStrikeBtn').addEventListener('click',walkStrike);
+  $('#walkHelpBtn').addEventListener('click',walkHelp);
   $('#walkRespawnBtn').addEventListener('click',respawnPlayer);
   const stick=$('#walkJoystick'),thumb=$('#walkStick');
   stick.addEventListener('pointerdown',e=>walk?.startJoystick(e,stick,thumb));
@@ -607,6 +632,7 @@ function bindUI(){
     if(walk?.key(e.code,true)){e.preventDefault();return}
     if(e.key.toLowerCase()==='v'){toggleWalkMode();return}
     if(e.key.toLowerCase()==='f'&&walk?.enabled){walkStrike();return}
+    if(e.key.toLowerCase()==='e'&&walk?.enabled){walkHelp();return}
     if(['1','2','3','4'].includes(e.key))selectTool(['meteor','tornado','quake','tsunami'][Number(e.key)-1]);
     else if(e.code==='Space'){e.preventDefault();togglePause()}
     else if(e.key.toLowerCase()==='r')createGame();
@@ -631,6 +657,7 @@ engine.runRenderLoop(()=>{
     world?.beginFrame();
     disasters?.tick(scaled);
     world?.update(scaled);
+    world?.progression.update(scaled,disasters);
     walk?.update(scaled,disasters);
     if(disasters?.shake>0&&camera){
       // Non-destructive screen-shake offsets target temporarily.

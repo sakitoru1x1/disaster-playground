@@ -88,7 +88,7 @@ export class WalkController {
       this.started=true;
       this.survival.spawn(this.camera.position.x,this.camera.position.z);
     }else{
-      this.survival.removeBody();
+      this.survival.dispose();
       if(document.pointerLockElement===this.canvas)document.exitPointerLock?.();
       this.scene.activeCamera=this.orbit;
       this.orbit.attachControl(this.canvas,true);

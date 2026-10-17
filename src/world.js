@@ -8,6 +8,8 @@ import {fractureStorey} from './fracture.js';
 import {splitOnCollision,splitVisualOnLanding,queueSecondaryFracture,canVisuallyFracture} from './secondaryFracture.js';
 import {populateCityLife,affectCityLife,updateCityLife} from './cityLife.js';
 import {trafficRoutes,positionOnRoute,trafficHeading} from './cityMotion.js';
+import {CityProgression} from './cityProgression.js';
+import {applyCrater} from './terrainDamage.js';
 import {planCity} from './cityLayout.js';
 import {makeFacadeWindows,compactSettledRubble} from './perfGeometry.js';
 import {applyVisualArtDirection,addShowcaseFloor,addShowcasePlaza,addShowcaseContact,addShowcaseEntrance,addDistrictContacts} from './visualPass.js';
@@ -105,6 +107,7 @@ export class CityWorld {
     addDistrictContacts(this);
     this.makeProps();
     populateCityLife(this);
+    this.progression=new CityProgression(this);
     this.optimizeStaticGeometry();
   }
 
@@ -181,7 +184,13 @@ export class CityWorld {
 
   makeTerrain(){
     const m=this.materials;
-    this.box('island slab',[172,4,172],V(0,-2.1,0),m.soil,null,true);
+    // Keep the island's decorative bedrock below the deepest crater, rather
+    // than letting a solid box visibly fill excavated terrain from underneath.
+    this.box('island slab',[172,4,172],V(0,-6.05,0),m.soil,null,true);
+    for(const edge of [-85.9,85.9]){
+      this.box('island cliff face',[171.8,4,.2],V(0,-2.02,edge),m.soil);
+      this.box('island cliff face',[.2,4,171.8],V(edge,-2.02,0),m.soil);
+    }
     const top=this.box('main land',[172,.15,172],V(0,-.035,0),m.island);top.receiveShadows=true;
     this.ground=top;top.isPickable=true;
     const ocean=MeshBuilder.CreateGround('endless sea',{width:1300,height:1300,subdivisions:30},this.scene);
@@ -706,6 +715,7 @@ export class CityWorld {
     return mesh;
   }
   affectLife(kind,center,power,radius,dt){affectCityLife(this,kind,center,power,radius,dt)}
+  damageTerrain(x,z,k,kind){return applyCrater(this,x,z,k,kind)}
   integrity(){return Math.max(0,Math.round(100*(1-this.brokenFloors/this.totalFloors)))}
   update(dt){
     this.time+=dt;
