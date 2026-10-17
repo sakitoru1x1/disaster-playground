@@ -1,4 +1,5 @@
 import {FreeCamera, Vector3} from '@babylonjs/core';
+import {PlayerSurvival} from './playerSurvival.js';
 
 // Ground-level spectator: no Havok character body (preserves the rubble physics budget).
 const EYE_HEIGHT=1.95;
@@ -29,7 +30,8 @@ export class WalkController {
     this.camera.maxZ=1000;
     this.camera.fov=1.18;
     this.camera.rotation.set(0,this.yaw,0);
-    this.camera.speed=0; // Position and collision handled by this controller.
+    this.camera.speed=0; // Havok survivor capsule drives camera positioning.
+    this.survival=new PlayerSurvival(this);
     this.onMove=e=>{
       if(!this.enabled||document.pointerLockElement!==canvas)return;
       this.rotate(e.movementX,e.movementY);
@@ -47,6 +49,7 @@ export class WalkController {
     document.removeEventListener('mousemove',this.onMove);
     document.removeEventListener('pointerlockchange',this.onLockChange);
     window.removeEventListener('blur',this.onBlur);
+    this.survival.dispose();
     this.camera.dispose();
   }
   // Choose a clear street corner rather than spawning into a random parked car.
@@ -83,7 +86,9 @@ export class WalkController {
         this.camera.rotation.set(0,this.yaw,0);
       }
       this.started=true;
+      this.survival.spawn(this.camera.position.x,this.camera.position.z);
     }else{
+      this.survival.removeBody();
       if(document.pointerLockElement===this.canvas)document.exitPointerLock?.();
       this.scene.activeCamera=this.orbit;
       this.orbit.attachControl(this.canvas,true);
@@ -179,27 +184,25 @@ export class WalkController {
     }
     return true;
   }
-  update(dt){
+  update(dt,disasters){
     if(!this.enabled)return;
     const k=this.keys;
     const forward=Number(k.has('KeyW')||k.has('ArrowUp'))-
       Number(k.has('KeyS')||k.has('ArrowDown'))-this.stickY;
     const right=Number(k.has('KeyD')||k.has('ArrowRight'))-
       Number(k.has('KeyA')||k.has('ArrowLeft'))+this.stickX;
-    const length=Math.hypot(forward,right);
-    if(length<.04)return;
-    const f=forward/Math.max(1,length),r=right/Math.max(1,length);
-    const speed=MOVE_SPEED*(k.has('ShiftLeft')||k.has('ShiftRight')?SPRINT_MULTIPLIER:1);
-    const step=Math.min(.05,dt)*speed;
-    const dx=(Math.sin(this.yaw)*f+Math.cos(this.yaw)*r)*step;
-    const dz=(Math.cos(this.yaw)*f-Math.sin(this.yaw)*r)*step;
-    const p=this.camera.position;
-    if(this.canStand(p.x+dx,p.z))p.x+=dx;
-    if(this.canStand(p.x,p.z+dz))p.z+=dz;
-    p.y=EYE_HEIGHT;
+    this.survival.step(dt,disasters,{forward,right,yaw:this.yaw,
+      sprint:k.has('ShiftLeft')||k.has('ShiftRight')});
+  }
+  respawn(){
+    const [x,z]=this.findSpawn();
+    this.camera.position.set(x,EYE_HEIGHT,z);
+    this.survival.revive(x,z);
+    return this.survival.dieState();
   }
   info(){return {enabled:this.enabled,x:+this.camera.position.x.toFixed(2),
     y:+this.camera.position.y.toFixed(2),z:+this.camera.position.z.toFixed(2),
     yaw:+this.yaw.toFixed(3),pitch:+this.pitch.toFixed(3),
-    pointerLocked:document.pointerLockElement===this.canvas};}
+    pointerLocked:document.pointerLockElement===this.canvas,
+    ...this.survival.dieState()};}
 }

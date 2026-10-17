@@ -176,7 +176,7 @@ export class DisasterSystem{
     const wave=this.startBlastWave(p,strength);
     const splashBroken=wave.broken;
     this.lastMeteorImpact={
-      ...this.lastMeteorImpact,x:p.x,y:p.y,z:p.z,phase:'explosion',exploded:true,
+      ...this.lastMeteorImpact,x:p.x,y:p.y,z:p.z,strength:m.strength,phase:'explosion',exploded:true,
       directBroken:m.immediateBroken,physicalPieces:m.immediatePieces,
       shockwaveBroken:splashBroken,waveRadius:r,explosionTime:this.time,
       elapsedAfterContact:this.time-m.contactTime,totalBroken:w.brokenFloors

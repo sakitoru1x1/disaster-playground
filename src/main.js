@@ -11,6 +11,7 @@ import {ShadowGenerator} from '@babylonjs/core/Lights/Shadows/shadowGenerator';
 import './ui.css';
 import './mobile.css';
 import './walk.css';
+import './playerSurvival.css';
 
 const $=selector=>document.querySelector(selector);
 const $$=selector=>[...document.querySelectorAll(selector)];
@@ -198,6 +199,7 @@ function toggleWalkMode(){
   if(!walk||rebuilding)return;
   walk.setEnabled(!walk.enabled);
   const active=walk.enabled;
+  $('#walkDeath').classList.toggle('is-visible',active&&walk.survival.dead);
   $('#walkBtn').classList.toggle('is-active',active);
   $('#walkBtn').setAttribute('aria-pressed',String(active));
   $('#walkBtn span').textContent=active?'EXIT WALK':'WALK';
@@ -228,7 +230,13 @@ function walkTarget(){
   point.z=Math.max(-80,Math.min(80,point.z));
   return point;
 }
-function walkStrike(){if(walk?.enabled)deployAt(walkTarget())}
+function walkStrike(){if(walk?.enabled&&!walk.survival.dead)deployAt(walkTarget())}
+function respawnPlayer(){
+  if(!walk?.enabled)return;
+  walk.respawn();
+  $('#walkDeath').classList.remove('is-visible');
+  toast('RESPAWNED','Health restored to 100%');
+}
 function cycleCamera(){
   if(walk?.enabled){toggleWalkMode();return}
   cameraIndex=(cameraIndex+1)%cameraAngles.length;
@@ -321,6 +329,14 @@ async function createGame(){
   $('#loadingText').textContent='CONSTRUCTING SIMULATED CITY...';
   world=new CityWorld(scene,camera,buildingCount,{mobile:mobileDevice});
   walk=new WalkController(scene,canvas,camera,world,mobileDevice);
+  walk.survival.onDeath=cause=>{
+    $('#walkDeathCause').textContent='CAUSE: '+cause.toUpperCase();
+    $('#walkDeath').classList.add('is-visible');
+    if(document.pointerLockElement===canvas)document.exitPointerLock?.();
+    toast('PLAYER KILLED','Respawn to try again');
+  };
+  $('#walkDeath').classList.remove('is-visible');
+  document.documentElement.style.setProperty('--player-hurt','0');
   const groundPhysics=new PhysicsAggregate(world.ground,PhysicsShapeType.BOX,{mass:0,friction:.93,restitution:.06},scene);
   const islandPhysics=new PhysicsAggregate(scene.getMeshByName('island slab'),PhysicsShapeType.BOX,{mass:0,friction:.92},scene);
   world.groundPhysics=groundPhysics;world.islandPhysics=islandPhysics;
@@ -462,6 +478,10 @@ async function createGame(){
       pavementTexture:!!world.materials.sidewalk.diffuseTexture,
       sun:world.sun.intensity,ambient:world.hemi.intensity}),
     getWalk:()=>walk?.info(),
+    getPlayerState:()=>walk?.survival.dieState(),
+    respawnPlayer:()=>respawnPlayer(),
+    // Developer-only disaster damage calibration; not exposed in the game UI.
+    damagePlayerForTest:(amount)=>walk?.survival.takeDamage(amount,'test'),
     toggleWalk:()=>toggleWalkMode(),
     getBuildings:()=>world.buildings.map(b=>({id:b.id,x:b.floors[0].mesh.position.x,z:b.floors[0].mesh.position.z,
       floors:b.floors.length,topY:b.floors.at(-1).mesh.position.y})),
@@ -524,6 +544,7 @@ function bindUI(){
   $('#cameraBtn').addEventListener('click',cycleCamera);
   $('#walkBtn').addEventListener('click',toggleWalkMode);
   $('#walkStrikeBtn').addEventListener('click',walkStrike);
+  $('#walkRespawnBtn').addEventListener('click',respawnPlayer);
   const stick=$('#walkJoystick'),thumb=$('#walkStick');
   stick.addEventListener('pointerdown',e=>walk?.startJoystick(e,stick,thumb));
   stick.addEventListener('pointermove',e=>walk?.updateJoystick(e,stick,thumb));
@@ -592,13 +613,13 @@ window.addEventListener('pagehide',()=>DisasterSystem.closeSharedAudio());
 engine.runRenderLoop(()=>{
   if(!scene)return;
   const dt=Math.min(engine.getDeltaTime()/1000,.065);
-  if(!rebuilding)walk?.update(dt);
   if(!rebuilding&&!paused){
     const scaled=dt*speed;
     simTime+=scaled;
     world?.beginFrame();
     disasters?.tick(scaled);
     world?.update(scaled);
+    walk?.update(scaled,disasters);
     if(disasters?.shake>0&&camera){
       // Non-destructive screen-shake offsets target temporarily.
       const s=disasters.shake;

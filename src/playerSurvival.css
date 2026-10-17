@@ -1,0 +1,37 @@
+
+/* Disaster survivor feedback: only visible while actively walking. */
+#walkVitals,#walkDamage,#walkDeath{display:none}
+.walk-mode #walkVitals{
+  display:block;position:absolute;z-index:7;pointer-events:none;
+  left:50%;top:calc(79px + 16px);transform:translateX(-50%);
+  width:195px;padding:10px 12px;background:#071b29e8;border:1px solid #fff4;
+  font:11px 'Segoe UI',sans-serif;color:#e7f4ed;letter-spacing:.8px
+}
+.walk-health-head{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:850}
+.walk-health-head span{color:#f4a6a0}
+.walk-health-track{height:6px;margin:8px 0;background:#5f3844;border:1px solid #fff2}
+#walkHealthFill{height:100%;width:100%;background:linear-gradient(90deg,#de6761,#96df94);transition:width .12s}
+#walkDanger{display:block;text-align:center;font-size:9px;color:#f0c89d}
+.walk-mode #walkDamage{
+  display:block;position:absolute;inset:0;pointer-events:none;z-index:6;
+  opacity:var(--player-hurt,0);background:radial-gradient(ellipse at center,
+    transparent 30%,#af1529aa 80%,#60020ade 100%);transition:opacity .16s
+}
+.walk-mode #walkDeath.is-visible{
+  display:flex;position:absolute;inset:0;z-index:15;align-items:center;
+  justify-content:center;flex-direction:column;gap:11px;
+  background:#18090bce;color:#ffe4d9;pointer-events:auto;
+  backdrop-filter:blur(3px)
+}
+#walkDeath h2{font-size:clamp(29px,6vw,70px);letter-spacing:5px;margin:0}
+#walkDeath p{font-size:13px;letter-spacing:1px;margin:5px 0 15px}
+#walkRespawnBtn{
+  border:1px solid #ffc88d;background:#e9af72;color:#091823;
+  font-weight:900;font-size:17px;letter-spacing:2px;padding:12px 34px
+}
+#walkDeath small{font-size:10px;color:#eabcbc}
+@media(max-width:1200px) and (max-height:660px), (max-width:600px){
+  .walk-mode #walkVitals{top:calc(var(--mobile-header,46px) + 9px);left:47%;width:143px;padding:6px 9px;font-size:9px}
+  .walk-mode #walkVitals .walk-health-track{margin:5px 0}
+  #walkDeath h2{font-size:35px}
+}
