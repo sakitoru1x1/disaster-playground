@@ -103,22 +103,28 @@ function spawnVisualRubble(world,entry,origin,local,size,kind,impulse,slabId=nul
   return true;
 }
 
+// Reserve fragment slots BEFORE removing an intact floor. In particular,
+// visual shards must never be left frozen at their original storey when the
+// Havok and animated-fallback budgets run out during a citywide collapse.
+export function planStoreyFracture(world,desiredSlabs){
+  const dynamicSlots=Math.max(0,Math.min(world.maxFragmentBodies,
+    world.maxPrimaryFragmentBodies)-world.fragments.length);
+  const visualSlots=Math.max(0,world.maxVisualFragments-world.visualFragments.length);
+  const slabCount=Math.min(desiredSlabs,dynamicSlots+visualSlots);
+  const wallCount=Math.min(world.massBlastActive?2:5,Math.max(0,dynamicSlots-slabCount));
+  return {slabCount,wallCount,dynamicSlots,visualSlots};
+}
+
 export function fractureStorey(world,entry,impulse,impactAt){
   const original=entry.mesh,origin=original.getAbsolutePosition().clone();
   const {x:w,y:h,z:d}=entry.size;
-  // Never remove an intact storey if we have no capacity to show its fragments.
-  if(world.fragments.length>=world.maxFragmentBodies&&
-     world.visualFragments.length>=world.maxVisualFragments)return false;
+  const desired=world.massBlastActive?(Math.random()<.64?2:3):chooseSlabSplitCount();
+  const {slabCount:selectedCount,wallCount}=planStoreyFracture(world,desired);
+  // No available falling slots: keep the intact floor queued until space frees.
+  // Never detach a storey if its slabs would be stranded in the air.
+  if(selectedCount===0)return false;
   entry.aggregate?.dispose();entry.aggregate=null;
   original.setEnabled(false);entry.active=true;world.brokenFloors++;
-
-  // Each floor plate is independently fractured into a RANDOM 2/3/5/8/10 pieces.
-  // A few non-slab fragments get priority to keep the walls recognizable.
-  // Large meteor shockwaves use a cheaper fracture pattern to keep Havok
-  // responsive while destroying many buildings in a short time.
-  const selectedCount=world.massBlastActive?(Math.random()<.64?2:3):chooseSlabSplitCount();
-  const room=Math.max(0,world.maxFragmentBodies-world.fragments.length);
-  const wallCount=Math.min(world.massBlastActive?2:5,Math.max(0,room-selectedCount));
   const panels=[
     {local:V(-w*.25,0,-d*.49),size:[w*.43,h*.88,.31],face:'back'},
     {local:V(w*.25,0,-d*.49),size:[w*.43,h*.78,.31],face:'back'},
@@ -155,13 +161,10 @@ export function fractureStorey(world,entry,impulse,impactAt){
       // Retain slab fragments at their real height and animate gravitational fall.
       staticParts++;
     }else{
-      // Max both budgets: retain a single visible piece of the floor in place.
-      // It is intentionally NOT teleported away.
-      const mesh=createBrokenSlab(world.scene,size,'retained slab shard');
-      mesh.metadata={...mesh.metadata,kind:'slab',slabId,fragmentSize:size.slice(),retained:true};
-      paintFragment(world,mesh,facadeAppearance(world,entry,'slab'));
-      mesh.position=origin.add(local);
-      world.rubble.push(mesh);staticParts++;
+      // Defensive guard if another caller ever consumes the reserved slots.
+      // Never create a static high-altitude shard: dropping one piece is safer
+      // than leaving a permanent floating slab over the ruined building.
+      world.visualDropped++;
     }
   }
   world.slabFractures.push({
