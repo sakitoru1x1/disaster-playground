@@ -10,7 +10,8 @@ import {populateCityLife,affectCityLife,updateCityLife} from './cityLife.js';
 import {trafficRoutes,positionOnRoute,trafficHeading} from './cityMotion.js';
 import {planCity} from './cityLayout.js';
 import {makeFacadeWindows,compactSettledRubble} from './perfGeometry.js';
-import {applyVisualArtDirection,addShowcaseFloor,addShowcasePlaza,addShowcaseContact,addShowcaseEntrance} from './visualPass.js';
+import {applyVisualArtDirection,addShowcaseFloor,addShowcasePlaza,addShowcaseContact,addShowcaseEntrance,addDistrictContacts} from './visualPass.js';
+import {prepareCityDetails,detailBuildingFloor,detailStreets,detailVehicle} from './cityDetail.js';
 import {sectionResistance,meteorDirectDamage,meteorBlastDamage,tornadoDamagePerSecond} from './structuralDamage.js';
 import {meteorHitDistribution,meteorScale} from './meteorBalance.js';
 
@@ -95,10 +96,13 @@ export class CityWorld {
     sun.shadowMaxZ=240;
     this.makeMaterials();
     applyVisualArtDirection(this);
+    prepareCityDetails(this);
     this.makeSky();
     this.makeTerrain();
+    detailStreets(this);
     addShowcasePlaza(this);
     this.makeDistricts();
+    addDistrictContacts(this);
     this.makeProps();
     populateCityLife(this);
     this.optimizeStaticGeometry();
@@ -233,23 +237,42 @@ export class CityWorld {
   }
 
   makeWindowTexture(){
-    const t=new DynamicTexture('procedural architectural windows',{width:256,height:128},this.scene,false);
-    t.hasAlpha=true;const c=t.getContext();c.clearRect(0,0,256,128);
-    c.fillStyle='#2d5567';
+    // 512px atlas shared by the whole city. Each pane has glass reflections,
+    // distinct interior brightness and fine mullions without more draw calls.
+    const t=new DynamicTexture('procedural architectural windows',{width:512,height:256},this.scene,false);
+    t.hasAlpha=true;const c=t.getContext();c.clearRect(0,0,512,256);
+    c.fillStyle='#273b4a';c.fillRect(0,0,512,256);
     for(let i=0;i<5;i++){
+      const x=12+i*102,y=22,w=83,h=212;
       const lit=(i===1||i===3) && Math.random()>.35;
-      c.fillStyle=lit?'#e7c194':'#4f8093';
-      c.fillRect(11+i*50,12,36,101);
-      c.fillStyle=lit?'#a18f78':'#7898a5';
-      c.fillRect(13+i*50,14,13,8);
-      c.fillStyle='#a3bfc7';c.fillRect(11+i*50,60,36,3);
+      const g=c.createLinearGradient(x,y,x+w,y+h);
+      if(lit){
+        g.addColorStop(0,'#edcf9b');g.addColorStop(.34,'#c4a982');
+        g.addColorStop(.7,'#b1967a');g.addColorStop(1,'#d5baa0');
+      }else{
+        g.addColorStop(0,'#558aa0');g.addColorStop(.45,'#2d556d');
+        g.addColorStop(.67,'#436d83');g.addColorStop(1,'#243c50');
+      }
+      c.fillStyle=g;c.fillRect(x,y,w,h);
+      // Window frames, horizon reflection and the recessed interior.
+      c.fillStyle='rgba(230,243,240,.24)';c.fillRect(x+6,y+5,4,h-12);
+      c.fillStyle='rgba(250,253,248,.18)';c.fillRect(x+12,y+5,8,h-12);
+      c.fillStyle=lit?'#998c7c':'#7797a5';c.fillRect(x,y+h*.53,w,5);
+      c.fillStyle='rgba(18,36,44,.40)';c.fillRect(x+w-10,y+8,6,h-15);
+      c.fillStyle='rgba(242,246,241,.14)';c.fillRect(x+4,y+6,w-8,4);
+      for(let j=0;j<3;j++){
+        const glint=x+23+j*16;
+        c.fillStyle='rgba(239,250,249,.075)';
+        c.fillRect(glint,y+11+j*15,2,h*.24);
+      }
     }
     t.update();
     const material=new StandardMaterial('city glass panels',this.scene);
     material.diffuseTexture=t;material.emissiveTexture=t;
-    material.diffuseColor=hex('#c5e1ed');material.emissiveColor=hex('#303d44');
-    material.specularPower=64;
-    material.useAlphaFromDiffuseTexture=true;material.backFaceCulling=false;material.specularColor=hex('#b9cdd1');
+    material.diffuseColor=hex('#c5e1ed');material.emissiveColor=hex('#252f35');
+    material.specularPower=80;
+    material.useAlphaFromDiffuseTexture=true;material.backFaceCulling=false;
+    material.specularColor=hex('#b9cdd1');
     return material;
   }
 
@@ -308,6 +331,7 @@ export class CityWorld {
         materialClass:isTop?'roof':n===0?'foundation':'concrete frame',
         maxHealth,health:maxHealth,damageTaken:0,damageMarks:0};
       entry.aggregate=new PhysicsAggregate(mesh,PhysicsShapeType.BOX,{mass:0,friction:.84,restitution:.08},this.scene);
+      detailBuildingFloor(this,entry,{modern,isTop});
       b.floors.push(entry);this.structures.push(entry);this.totalFloors++;
     }
     if(showcase)addShowcaseContact(this,x+offsX,z+offsZ,width,depth);
@@ -350,6 +374,7 @@ export class CityWorld {
       const aggregate=new PhysicsAggregate(car,PhysicsShapeType.BOX,{mass:11,friction:.7,restitution:.16},this.scene);
       aggregate.body.setLinearDamping(.45);aggregate.body.setAngularDamping(.5);
       aggregate.body.setMotionType(PhysicsMotionType.ANIMATED);
+      detailVehicle(this,car);
       this.props.push({mesh:car,aggregate,type:'car',active:true,
         traffic:{route,distance,speed,state:'driving',heading,lastPosition:V(p.x,1,p.z)}});
     }

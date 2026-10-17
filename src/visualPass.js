@@ -127,6 +127,35 @@ function contactMaterial(world){
   shadowMat.disableDepthWrite=true;
   return shadowMat;
 }
+
+// One shared translucent, ground-hugging quad mesh for non-showcase buildings.
+// This adds soft architectural grounding on mobile even when realtime shadows
+// are disabled, instead of enabling another expensive per-building shadow map.
+export function addDistrictContacts(world){
+  const positions=[],indices=[],uvs=[];
+  for(const building of world.buildings){
+    if(building.showcase)continue; // already has the older dedicated contact.
+    const floor=building.floors[0],p=floor.mesh.position;
+    const sx=floor.size.x*.5+1.65,sz=floor.size.z*.5+1.65,y=.302;
+    const start=positions.length/3;
+    positions.push(
+      p.x-sx,y,p.z-sz,p.x-sx,y,p.z+sz,
+      p.x+sx,y,p.z+sz,p.x+sx,y,p.z-sz
+    );
+    uvs.push(0,0,0,1,1,1,1,0);
+    indices.push(start,start+1,start+2,start,start+2,start+3);
+  }
+  if(!positions.length)return null;
+  const data=new VertexData(),normals=[];
+  VertexData.ComputeNormals(positions,indices,normals);
+  data.positions=positions;data.indices=indices;data.normals=normals;data.uvs=uvs;
+  const mesh=new Mesh('batched soft building footprint shadows',world.scene);
+  data.applyToMesh(mesh);mesh.material=contactMaterial(world);
+  mesh.isPickable=false;mesh.receiveShadows=false;
+  mesh.freezeWorldMatrix();
+  return mesh;
+}
+
 export function addShowcaseEntrance(world,parent,width,depth,fh,style){
   // A single pair of painted shopfront canopies, parented to the foundation.
   const trim=rgba(world.materials.wallsAccent[style].diffuseColor);
