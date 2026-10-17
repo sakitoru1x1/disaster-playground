@@ -12,7 +12,7 @@ import {CityProgression} from './cityProgression.js';
 import {applyCrater} from './terrainDamage.js';
 import {buildCitySurfaceSkins} from './terrainSurface.js';
 import {planCity,BLOCK_COORDS,ROAD_COORDS,CITY_HALF_SIZE,isPark} from './cityLayout.js';
-import {buildDistrictShells,damageDistrictShells} from './cityDistricts.js';
+import {buildDistrictBuildings,activateDistrictBuilding} from './cityDistricts.js';
 import {makeFacadeWindows,compactSettledRubble} from './perfGeometry.js';
 import {applyVisualArtDirection,addShowcaseFloor,addShowcasePlaza,addShowcaseContact,addShowcaseEntrance,addDistrictContacts} from './visualPass.js';
 import {prepareCityDetails,detailBuildingFloor,detailStreets,detailVehicle} from './cityDetail.js';
@@ -31,7 +31,7 @@ export class CityWorld {
     this.mobile=!!options.mobile;
     this.buildingCount=Math.max(1,Math.min(30,Math.round(buildingCount)));
     this.structures=[];this.buildings=[];this.props=[];this.trees=[];this.debris=[];
-    this.districtShells=[];this.cityHalfSize=CITY_HALF_SIZE;
+    this.districtBuildings=[];this.cityHalfSize=CITY_HALF_SIZE;
     this.fragments=[];this.rubble=[];this.pendingFailures=[];this.slabFractures=[];this.maxFragmentBodies=260;
     this.staticRubbleBatches=[];this.bakedRubbleMeshes=0;this.rubbleBatchSavedDraws=0;this.nextRubbleBatchTime=0;
     this.fracturesThisFrame=0;this.maxFracturesPerFrame=this.mobile?2:3;
@@ -108,7 +108,7 @@ export class CityWorld {
     detailStreets(this);
     addShowcasePlaza(this);
     this.makeDistricts();
-    buildDistrictShells(this);
+    buildDistrictBuildings(this);
     addDistrictContacts(this);
     this.makeProps();
     populateCityLife(this);
@@ -434,7 +434,7 @@ export class CityWorld {
 
   findBuildingAt(x,z,y=0){
     let group=null;
-    for(const building of this.buildings){
+    for(const building of [...this.buildings,...this.districtBuildings]){
       const intact=building.floors.filter(e=>!e.active);
       const hit=intact.find(e=>{
         const p=e.mesh.getAbsolutePosition();
@@ -452,6 +452,7 @@ export class CityWorld {
   // section. Damage never makes an intact storey fall until resistance is gone.
   damageStructure(entry,amount,impulse=V(0,0,0),impactAt=null,source='impact'){
     if(!entry||entry.active||amount<=0)return false;
+    if(entry.building?.district)activateDistrictBuilding(this,entry.building);
     entry.health=Math.max(0,entry.health-amount);
     entry.damageTaken+=amount;
     const ratio=entry.health/entry.maxHealth;
@@ -509,6 +510,7 @@ export class CityWorld {
       this.cascadeDeferred++;
       return false;
     }
+    if(entry.building?.district)activateDistrictBuilding(this,entry.building);
     if(!fractureStorey(this,entry,impulse,impactAt))return false;
     this.fracturesThisFrame++;
     // Removing ANY structural storey removes support for the entire stack above it.
@@ -715,10 +717,7 @@ export class CityWorld {
     }
     return mesh;
   }
-  affectLife(kind,center,power,radius,dt){
-    affectCityLife(this,kind,center,power,radius,dt);
-    damageDistrictShells(this,kind,center,power,radius,dt);
-  }
+  affectLife(kind,center,power,radius,dt){affectCityLife(this,kind,center,power,radius,dt)}
   damageTerrain(x,z,k,kind){return applyCrater(this,x,z,k,kind)}
   integrity(){return Math.max(0,Math.round(100*(1-this.brokenFloors/this.totalFloors)))}
   update(dt){

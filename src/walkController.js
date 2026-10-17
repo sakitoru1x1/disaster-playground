@@ -161,17 +161,12 @@ export class WalkController {
   // Check X and Z independently for natural sliding around obstacles.
   canStand(x,z){
     if(Math.abs(x)>LIMIT||Math.abs(z)>LIMIT)return false;
-    for(const b of this.world.buildings){
+    for(const b of [...this.world.buildings,...this.world.districtBuildings]){
       const floor=b.floors[0];
       if(!floor||floor.active||floor.mesh.isDisposed())continue;
       const p=floor.mesh.position,s=floor.size;
       if(Math.abs(x-p.x)<s.x/2+PLAYER_RADIUS&&
          Math.abs(z-p.z)<s.z/2+PLAYER_RADIUS)return false;
-    }
-    for(const shell of this.world.districtShells||[]){
-      if(shell.ruined||shell.mesh.isDisposed())continue;
-      if(Math.abs(x-shell.x)<shell.mesh.getBoundingInfo().boundingBox.extendSize.x+PLAYER_RADIUS &&
-         Math.abs(z-shell.z)<shell.mesh.getBoundingInfo().boundingBox.extendSize.z+PLAYER_RADIUS)return false;
     }
     for(const car of this.world.props){
       if(car.type!=='car'||car.mesh.isDisposed())continue;

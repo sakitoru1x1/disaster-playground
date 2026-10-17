@@ -111,7 +111,7 @@ export class CityProgression {
   this.tryBuildNewBlock(time);
   if(time<this.nextRepair)return;
   this.nextRepair=time+ (world.mobile?5.5:3.5);
-  const candidates=world.buildings.filter(b=>b.floors.some(e=>e.active));
+  const candidates=[...world.buildings,...(world.districtBuildings||[])].filter(b=>b.floors.some(e=>e.active));
   if(!candidates.length)return;
   const b=candidates[this.rebuilt%candidates.length];
   const floor=b.floors.find(e=>e.active);

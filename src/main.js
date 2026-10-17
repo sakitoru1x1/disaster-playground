@@ -166,15 +166,6 @@ function surfacePoint(sx,sy){
       best=info.distance;hitFloor=e;
     }
   }
-  // Peripheral single-body structures can be aimed at, too. A hit to the
-  // facade must not target a patch of ground behind the building.
-  for(const shell of world?.districtShells||[]){
-    if(shell.ruined||shell.mesh.isDisposed())continue;
-    const info=ray.intersectsMesh(shell.mesh,false);
-    if(info?.hit&&info.distance>0&&info.distance<best){
-      best=info.distance;hitFloor=null;p=shell.mesh.getAbsolutePosition().clone();
-    }
-  }
   if(hitFloor){
     const center=hitFloor.mesh.getAbsolutePosition();
     p=new Vector3(center.x,center.y,center.z);
@@ -239,13 +230,6 @@ function walkTarget(){
     const result=ray.intersectsMesh(part.mesh,false);
     if(result?.hit&&result.distance>0&&result.distance<best){
       best=result.distance;hit=part.mesh.getAbsolutePosition().clone();
-    }
-  }
-  for(const shell of world.districtShells||[]){
-    if(shell.ruined||shell.mesh.isDisposed())continue;
-    const result=ray.intersectsMesh(shell.mesh,false);
-    if(result?.hit&&result.distance>0&&result.distance<best){
-      best=result.distance;hit=shell.mesh.getAbsolutePosition().clone();
     }
   }
   if(hit)return hit;
@@ -399,7 +383,7 @@ async function createGame(){
     getPerf:()=>({fps:engine.getFps(),drawCalls:engine._drawCalls?.current??null,meshes:scene.meshes.length,activeMeshes:scene.getActiveMeshes().length,activeIndices:scene.getActiveIndices(),hardwareScale:engine.getHardwareScalingLevel(),width:engine.getRenderWidth(),height:engine.getRenderHeight(),shadows:world.shadow.getShadowMap()?.getSize()?.width||0,batching:world.staticBatchStats,mobile:mobileDevice,quality:mobileDevice?(qualityHigh?'SHARP':'MOBILE'):(qualityHigh?'ULTRA':'PERF')}),
     getState:()=>({terrainDeformations:world.terrainDeformations,craters:world.terrainCraters.length,
       ...world.progression.stats(),fps:engine.getFps(),buildings:world.buildings.length,requestedBuildings:buildingCount,floors:world.totalFloors,broken:world.brokenFloors,
-    districtShells:world.districtShells.length,districtShellsCollapsed:world.districtShellsCollapsed,cityWidth:CITY_HALF_SIZE*2,activeBodies:world.activeBodies,impacts:world.impactCount,integrity:world.integrity(),activeEffects:disasters.effects.length,craneJointActive:!!world.crane,fragments:world.fragments.length,shadowMapSize:world.shadow.getShadowMap()?.getSize().width,pendingFailures:world.pendingFailures.length,slabFractures:world.slabFractures.length,slabSplitCounts:world.slabFractures.slice(-30).map(s=>s.requestedParts),slabPhysicalParts:world.slabFractures.reduce((a,s)=>a+s.physicalParts,0),slabStaticParts:world.slabFractures.reduce((a,s)=>a+s.staticParts,0),
+    districtBuildings:world.districtBuildings.length,districtFloors:world.districtBuildings.reduce((n,b)=>n+b.floors.length,0),districtPhysicsActivated:world.districtBuildings.filter(b=>b.physicsActivated).length,cityWidth:CITY_HALF_SIZE*2,activeBodies:world.activeBodies,impacts:world.impactCount,integrity:world.integrity(),activeEffects:disasters.effects.length,craneJointActive:!!world.crane,fragments:world.fragments.length,shadowMapSize:world.shadow.getShadowMap()?.getSize().width,pendingFailures:world.pendingFailures.length,slabFractures:world.slabFractures.length,slabSplitCounts:world.slabFractures.slice(-30).map(s=>s.requestedParts),slabPhysicalParts:world.slabFractures.reduce((a,s)=>a+s.physicalParts,0),slabStaticParts:world.slabFractures.reduce((a,s)=>a+s.staticParts,0),
     fallingVisual:world.visualFragments.length,
     retainedShards:scene.meshes.filter(m=>m.metadata?.retained).length,
     floatingSettledSlabs:world.rubble.filter(m=>!m.isDisposed()&&m.metadata?.kind==='slab'&&m.position.y>5).length,
@@ -549,6 +533,17 @@ async function createGame(){
     toggleWalk:()=>toggleWalkMode(),
     getBuildings:()=>world.buildings.map(b=>({id:b.id,x:b.floors[0].mesh.position.x,z:b.floors[0].mesh.position.z,
       floors:b.floors.length,topY:b.floors.at(-1).mesh.position.y})),
+    getDistrictBuildings:()=>world.districtBuildings.map(b=>({id:b.id,x:b.x,z:b.z,
+      kind:b.design.kind,floors:b.floors.length,activeFloors:b.floors.filter(e=>e.active).length,
+      physicsActivated:b.physicsActivated,proxy:!!b.proxy,topY:b.floors.at(-1).mesh.position.y})),
+    testDistrictImpact:(id)=>{
+      const b=world.districtBuildings.find(x=>x.id===id);if(!b)return null;
+      const entry=b.floors.at(-1),pos=entry.mesh.getAbsolutePosition();
+      const before=world.brokenFloors;
+      world.kineticMeteorImpact(pos,new Vector3(0,-1,0),1,entry);
+      return {activated:b.physicsActivated,proxy:!!b.proxy,broken:world.brokenFloors-before,
+        topFloorActive:entry.active,allFloorsScaled:b.floors.every(f=>f.mesh.scaling.y===1)};
+    },
     getPick:(x,y)=>{const p=surfacePoint(x,y);return p?{x:p.x,y:p.y,z:p.z}:null},
     deploy:(kind='meteor',x=0,z=0,p=.7)=>disasters.deploy(kind,new Vector3(x,0,z),p),
     deployAt:(kind,x,y,z,p=.8)=>disasters.deploy(kind,new Vector3(x,y,z),p),

@@ -3,7 +3,6 @@ import {
 } from '@babylonjs/core';
 import {reshapeCitySurfaceSkins,reshapeLooseDecorations} from './terrainSurface.js';
 import {CITY_HALF_SIZE} from './cityLayout.js';
-import {damageDistrictShells} from './cityDistricts.js';
 
 const clamp=(x,lo,hi)=>Math.min(hi,Math.max(lo,x));
 const dist=(x,z,c)=>Math.hypot(x-c.x,z-c.z);
@@ -96,7 +95,7 @@ export function applyCrater(world,x,z,power=1,kind='meteor'){
   }
  }
  // An intact structure whose foundation is undermined must fracture normally.
- for(const b of world.buildings){
+ for(const b of [...world.buildings,...(world.districtBuildings||[])]){
   const foundation=b.floors[0];
   if(foundation.active)continue;
   const distance=Math.hypot(foundation.mesh.position.x-x,foundation.mesh.position.z-z);
@@ -106,13 +105,6 @@ export function applyCrater(world,x,z,power=1,kind='meteor'){
     foundation.mesh.position,'terrain');
   }
  }
- // The new low-cost peripheral structures must not remain suspended above
- // excavated foundations. A crater can topple their single rigid body.
- for(const shell of world.districtShells||[]){
-  if(!shell.ruined&&Math.hypot(shell.x-x,shell.z-z)<c.radius*.72)
-   shell.damage=Math.max(shell.damage,.86);
- }
- damageDistrictShells(world,kind,new Vector3(x,0,z),Math.max(.7,k),c.radius,.3);
  world.terrainDeformations=(world.terrainDeformations||0)+1;
  return c;
 }
