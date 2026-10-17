@@ -1,6 +1,10 @@
 import {strict as assert} from 'node:assert';
 import {Vector3} from '@babylonjs/core';
-import {PlayerSurvival} from '../src/playerSurvival.js';
+import {PlayerSurvival,PLAYER_EYE_OFFSET} from '../src/playerSurvival.js';
+// The old camera offset (.78) gave a settled world-eye Y of ~1.69 m while
+// neighboring pedestrians have face Y around 2.15 m. Regression guard:
+assert(PLAYER_EYE_OFFSET>=1.10&&PLAYER_EYE_OFFSET<=1.28,
+ 'First-person view must be approximately eye-to-eye with pedestrians');
 const V=(x,y,z)=>new Vector3(x,y,z);
 function rig(){
  let impulses=[],forces=[],deaths=0;

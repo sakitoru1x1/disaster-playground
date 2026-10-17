@@ -6,7 +6,12 @@ import {PhysicalRagdoll} from './physicalRagdoll.js';
 // the existing world; health / drowning / balance are gameplay rules.
 const V=(x,y,z)=>new Vector3(x,y,z);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-const HEIGHT=1.9, RADIUS=.48, MASS=65, EYE_OFFSET=.78;
+const HEIGHT=1.9, RADIUS=.48, MASS=65;
+// Havok's settled capsule center is ~0.91 m on a level road. The former
+// +0.78 offset put the camera at ~1.69 m, visibly below NPCs' eyes (~2.15 m).
+// Raise ONLY the view to adult eye level; retain the same collision capsule
+// and full physics following for falls, knockdowns and real terrain craters.
+export const PLAYER_EYE_OFFSET=1.18;
 const safeMesh=m=>m&&!m.isDisposed()&&m.isEnabled();
 
 export class PlayerSurvival {
@@ -264,7 +269,7 @@ export class PlayerSurvival {
     this.cameraShakeTime+=dt*29;
     const bob=Math.sin(this.cameraShakeTime)*Math.min(.16,this.shake*.11);
     const tilt=this.knockdown>0?.25:0;
-    this.camera.position.set(pos.x,pos.y+EYE_OFFSET-tilt+bob,pos.z);
+    this.camera.position.set(pos.x,pos.y+PLAYER_EYE_OFFSET-tilt+bob,pos.z);
     const shakeX=this.shake*Math.sin(this.cameraShakeTime*2.3)*.025;
     const shakeY=this.shake*Math.cos(this.cameraShakeTime*1.73)*.03;
     this.camera.rotation.set(this.walk.pitch+shakeY,

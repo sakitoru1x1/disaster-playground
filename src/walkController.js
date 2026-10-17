@@ -2,7 +2,8 @@ import {FreeCamera, Vector3} from '@babylonjs/core';
 import {PlayerSurvival} from './playerSurvival.js';
 
 // Ground-level spectator: no Havok character body (preserves the rubble physics budget).
-const EYE_HEIGHT=1.95;
+// Match the normal standing eye line when activating WALK / RESPAWN.
+const EYE_HEIGHT=2.08;
 const PLAYER_RADIUS=.56;
 const MOVE_SPEED=7.2;
 const SPRINT_MULTIPLIER=1.65;
