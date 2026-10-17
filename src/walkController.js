@@ -1,6 +1,7 @@
 import {FreeCamera, Vector3} from '@babylonjs/core';
 import {PlayerSurvival} from './playerSurvival.js';
 import {CITY_HALF_SIZE} from './cityLayout.js';
+import {applyLevelLook} from './cameraHorizon.js';
 
 // Ground-level spectator: no Havok character body (preserves the rubble physics budget).
 // Match the normal standing eye line when activating WALK / RESPAWN.
@@ -31,7 +32,7 @@ export class WalkController {
     this.camera.minZ=.07;
     this.camera.maxZ=1000;
     this.camera.fov=1.18;
-    this.camera.rotation.set(0,this.yaw,0);
+    applyLevelLook(this.camera,this.yaw,0);
     this.camera.speed=0; // Havok survivor capsule drives camera positioning.
     this.survival=new PlayerSurvival(this);
     this.onMove=e=>{
@@ -85,7 +86,7 @@ export class WalkController {
         const [x,z]=this.findSpawn();
         this.camera.position.set(x,EYE_HEIGHT,z);
         this.yaw=Math.atan2(-x,-z);this.pitch=0;
-        this.camera.rotation.set(0,this.yaw,0);
+        applyLevelLook(this.camera,this.yaw,0);
       }
       this.started=true;
       this.survival.spawn(this.camera.position.x,this.camera.position.z);
@@ -108,7 +109,7 @@ export class WalkController {
     const sensitivity=this.mobile?.0043:.00215;
     this.yaw+=dx*sensitivity;
     this.pitch=clamp(this.pitch+dy*sensitivity,-1.43,1.43);
-    this.camera.rotation.set(this.pitch,this.yaw,0);
+    applyLevelLook(this.camera,this.yaw,this.pitch);
   }
   key(code,pressed){
     if(!this.enabled)return false;

@@ -1,6 +1,7 @@
 import {MeshBuilder, PhysicsAggregate, PhysicsShapeType, Vector3} from '@babylonjs/core';
 import {meteorScale} from './meteorBalance.js';
 import {PhysicalRagdoll} from './physicalRagdoll.js';
+import {applyLevelLook,applyLevelLookAt} from './cameraHorizon.js';
 import {CITY_HALF_SIZE} from './cityLayout.js';
 
 // Player is one real Havok rigid body. All impulses and collisions happen in
@@ -229,12 +230,12 @@ export class PlayerSurvival {
       const p=this.ragdoll.torso.position;
       this.camera.position.set(p.x-Math.sin(this.walk.yaw)*5,
         p.y+2.5,p.z-Math.cos(this.walk.yaw)*5);
-      this.camera.setTarget(p.add(V(0,.45,0)));
+      applyLevelLookAt(this.camera,p.add(V(0,.45,0)));
       this.knockdown=Math.max(0,this.knockdown-dt);
       if(!this.dead&&this.ragdoll.age>1.6){
         this.ragdoll.dispose();this.ragdoll=null;
         this.spawn(p.x,p.z);
-        this.camera.rotation.set(this.walk.pitch,this.walk.yaw,0);
+        applyLevelLook(this.camera,this.walk.yaw,this.walk.pitch);
       }
       return;
     }
@@ -273,8 +274,9 @@ export class PlayerSurvival {
     this.camera.position.set(pos.x,pos.y+PLAYER_EYE_OFFSET-tilt+bob,pos.z);
     const shakeX=this.shake*Math.sin(this.cameraShakeTime*2.3)*.025;
     const shakeY=this.shake*Math.cos(this.cameraShakeTime*1.73)*.03;
-    this.camera.rotation.set(this.walk.pitch+shakeY,
-      this.walk.yaw+shakeX,this.knockdown>0?.09*Math.sin(this.cameraShakeTime*.6):0);
+    // Keep head turns, hit reactions and stun entirely roll-free. The world
+    // horizon must stay level even while looking sideways on a phone.
+    applyLevelLook(this.camera,this.walk.yaw+shakeX,this.walk.pitch+shakeY);
     this.uiTimer+=dt;
     if(this.uiTimer>.14){
       this.uiTimer=0;
