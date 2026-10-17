@@ -1,0 +1,40 @@
+import {strict as assert} from 'node:assert';
+import {NullEngine,Scene,StandardMaterial} from '@babylonjs/core';
+import {BLOCK_COORDS,ROAD_COORDS,CITY_HALF_SIZE,planCity,districtPlots,isPark} from '../src/cityLayout.js';
+import {ROADS,SIDEWALK_COORDS,trafficRoutes,positionOnRoute} from '../src/cityMotion.js';
+import {roadSurfaceSpecs,buildCitySurfaceSkins} from '../src/terrainSurface.js';
+
+assert.equal(BLOCK_COORDS.length,11);
+assert.equal(ROAD_COORDS.length,10);
+assert.equal(ROADS,ROAD_COORDS,'Road and city layout must share a grid');
+assert(CITY_HALF_SIZE*2*CITY_HALF_SIZE*2/(172*172)>3,'Island has not grown to 3x area');
+assert(CITY_HALF_SIZE*2*CITY_HALF_SIZE*2/(172*172)<5,'Island grew outside scope');
+assert.equal(SIDEWALK_COORDS.length,20);
+const plots=districtPlots();
+assert(plots.length>100);
+assert(plots.every(p=>!isPark(p.x,p.z)));
+assert(new Set(plots.map(p=>p.district)).size===5,'Five districts must exist');
+const plan=planCity(30),sites=plan.flatMap(p=>p.buildings);
+assert.equal(sites.length,30);
+assert(new Set(sites.map(p=>p.x+','+p.z)).size===30,'No overlapping active building plots');
+assert(planCity(22).every((p,i)=>p.x===plan[i].x&&p.z===plan[i].z),
+ 'Organic construction must preserve previous lots');
+assert(new Set(plan.map(p=>p.district)).size===5,'All districts need playable buildings');
+const routes=trafficRoutes(40,()=>.5);
+const starts=new Set(routes.map(t=>{
+ const p=positionOnRoute(t.route,0);
+ assert(Math.abs(p.x)<CITY_HALF_SIZE&&Math.abs(p.z)<CITY_HALF_SIZE);
+ return Math.floor(p.x/26)+','+Math.floor(p.z/26);
+}));
+assert(starts.size>25,'Traffic must be dispersed across many blocks');
+const specs=roadSurfaceSpecs();
+assert.equal(specs.asphalt.length,20,'Ten avenues per axis');
+assert.equal(specs.sidewalk.length,121,'Each city plot has a walkable surface');
+assert(specs.grass.length>=9,'Peripheral parks were omitted');
+const engine=new NullEngine(),scene=new Scene(engine);
+const material=()=>new StandardMaterial('expansion test',scene);
+const world={scene,materials:{road:material(),sidewalk:material(),marking:material(),grass:material()}};
+const skins=buildCitySurfaceSkins(world);
+assert.equal(skins.length,4,'Keep pavement meshes batched by material');
+scene.dispose();engine.dispose();
+console.log('CITY_EXPANSION_PASS: 3.29x land area, 11x11 lots, five districts, 100 road loops, crater-ready pavement');

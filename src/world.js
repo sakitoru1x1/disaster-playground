@@ -11,7 +11,8 @@ import {trafficRoutes,positionOnRoute,trafficHeading} from './cityMotion.js';
 import {CityProgression} from './cityProgression.js';
 import {applyCrater} from './terrainDamage.js';
 import {buildCitySurfaceSkins} from './terrainSurface.js';
-import {planCity} from './cityLayout.js';
+import {planCity,BLOCK_COORDS,ROAD_COORDS,CITY_HALF_SIZE,isPark} from './cityLayout.js';
+import {buildDistrictShells,damageDistrictShells} from './cityDistricts.js';
 import {makeFacadeWindows,compactSettledRubble} from './perfGeometry.js';
 import {applyVisualArtDirection,addShowcaseFloor,addShowcasePlaza,addShowcaseContact,addShowcaseEntrance,addDistrictContacts} from './visualPass.js';
 import {prepareCityDetails,detailBuildingFloor,detailStreets,detailVehicle} from './cityDetail.js';
@@ -30,6 +31,7 @@ export class CityWorld {
     this.mobile=!!options.mobile;
     this.buildingCount=Math.max(1,Math.min(30,Math.round(buildingCount)));
     this.structures=[];this.buildings=[];this.props=[];this.trees=[];this.debris=[];
+    this.districtShells=[];this.cityHalfSize=CITY_HALF_SIZE;
     this.fragments=[];this.rubble=[];this.pendingFailures=[];this.slabFractures=[];this.maxFragmentBodies=260;
     this.staticRubbleBatches=[];this.bakedRubbleMeshes=0;this.rubbleBatchSavedDraws=0;this.nextRubbleBatchTime=0;
     this.fracturesThisFrame=0;this.maxFracturesPerFrame=this.mobile?2:3;
@@ -96,7 +98,7 @@ export class CityWorld {
     this.shadow.normalBias=.026;
     this.shadow.frustumEdgeFalloff=.6;
     sun.shadowMinZ=1;
-    sun.shadowMaxZ=240;
+    sun.shadowMaxZ=380;
     this.makeMaterials();
     applyVisualArtDirection(this);
     prepareCityDetails(this);
@@ -106,6 +108,7 @@ export class CityWorld {
     detailStreets(this);
     addShowcasePlaza(this);
     this.makeDistricts();
+    buildDistrictShells(this);
     addDistrictContacts(this);
     this.makeProps();
     populateCityLife(this);
@@ -188,32 +191,36 @@ export class CityWorld {
     const m=this.materials;
     // Keep the island's decorative bedrock below the deepest crater, rather
     // than letting a solid box visibly fill excavated terrain from underneath.
-    this.box('island slab',[172,4,172],V(0,-6.05,0),m.soil,null,true);
-    for(const edge of [-85.9,85.9]){
-      this.box('island cliff face',[171.8,4,.2],V(0,-2.02,edge),m.soil);
-      this.box('island cliff face',[.2,4,171.8],V(edge,-2.02,0),m.soil);
+    this.box('island slab',[CITY_HALF_SIZE*2,4,CITY_HALF_SIZE*2],V(0,-6.05,0),m.soil,null,true);
+    for(const edge of [-CITY_HALF_SIZE+.1,CITY_HALF_SIZE-.1]){
+      this.box('island cliff face',[CITY_HALF_SIZE*2-.2,4,.2],V(0,-2.02,edge),m.soil);
+      this.box('island cliff face',[.2,4,CITY_HALF_SIZE*2-.2],V(edge,-2.02,0),m.soil);
     }
-    const top=this.box('main land',[172,.15,172],V(0,-.035,0),m.island);top.receiveShadows=true;
+    const top=this.box('main land',[CITY_HALF_SIZE*2,.15,CITY_HALF_SIZE*2],V(0,-.035,0),m.island);top.receiveShadows=true;
     this.ground=top;top.isPickable=true;
     const ocean=MeshBuilder.CreateGround('endless sea',{width:1300,height:1300,subdivisions:30},this.scene);
     ocean.position.y=-3.25;ocean.material=m.water;ocean.isPickable=false;
     this.sea=ocean;
-    // Pale surf encircles the floating landmass.
-    for(let i=0;i<3;i++){
-      const ring=MeshBuilder.CreateTorus('coastal surf '+i,{diameter:176+i*5,thickness:.2+i*.06,tessellation:96},this.scene);
-      ring.scaling.z=1;ring.position.y=-3.12+i*.012;ring.material=this.mat('surf foam '+i,'#b8dedd',{emissive:'#7fb7c6',alpha:.48-i*.08});ring.isPickable=false;
+    // Continuous coastline wash follows the square island perimeter.
+    const foam=this.mat('coastal foam','#b8dedd',{emissive:'#7fb7c6',alpha:.48});
+    for(const offset of [2.8,5.2]){
+      const d=CITY_HALF_SIZE+offset;
+      for(const side of [-1,1]){
+        this.box('coast surf',[d*2,.10,.32],V(0,-3.10,side*d),foam);
+        this.box('coast surf',[.32,.10,d*2],V(side*d,-3.10,0),foam);
+      }
     }
     // Asphalt, lane paint and sidewalk paving are now tessellated surface
     // skins (terrainSurface.js), NOT giant unbreakable six-faced boxes.
     // This lets a meteor genuinely excavate the road instead of showing an
     // unchanged asphalt sheet while the physics capsule falls underneath it.
     // District plots and subtle grassy courtyards.
-    const coords=[-52,-26,0,26,52];
-    for(let i=0;i<5;i++)for(let j=0;j<5;j++){
+    const coords=BLOCK_COORDS;
+    for(let i=0;i<coords.length;i++)for(let j=0;j<coords.length;j++){
       const x=coords[i],z=coords[j];
-      if((i===1&&j===3)||(i===3&&j===1)||(i===2&&j===2)){
+      if(isPark(x,z)){
         // Park grass lives in the deformable landscape skin, not a rigid plate.
-        if(i===2&&j===2){
+        if(x===0&&z===0){
           const plaza=this.cylinder('central fountain basin',8,.72,V(x,.7,z),m.trim,36);
           const pond=this.cylinder('fountain water',6.7,.12,V(x,1.11,z),m.water,36);
           const art=this.cylinder('public sculpture',.7,4.1,V(x,3,z),this.materials.dark,6);
@@ -224,14 +231,16 @@ export class CityWorld {
       }
       for(let a=0;a<4;a++){
         const side=a<2?-1:1,axis=a%2===0;
-        if((i===2&&j===2))continue;
+        if(x===0&&z===0)continue;
         const px=x+(axis?side*8.3:0),pz=z+(!axis?side*8.3:0);
-        if(Math.random()<.75*Math.min(1,.12+this.buildingCount/26))this.createTree(px+rand(-.5,.5),pz+rand(-.5,.5),.6);
+        const nearby=Math.hypot(x,z)<80;
+        const density=nearby?(this.mobile?.23:.31):(this.mobile?.08:.15);
+        if(Math.random()<density*Math.min(1,.45+this.buildingCount/32))this.createTree(px+rand(-.5,.5),pz+rand(-.5,.5),.6);
       }
     }
     for(let k=0;k<13;k++){
       const theta=k/13*Math.PI*2;
-      const x=Math.cos(theta)*(106+Math.sin(k*2.3)*12),z=Math.sin(theta)*(105+Math.cos(k*3.8)*11);
+      const x=Math.cos(theta)*(CITY_HALF_SIZE+23+Math.sin(k*2.3)*12),z=Math.sin(theta)*(CITY_HALF_SIZE+22+Math.cos(k*3.8)*11);
       const island=MeshBuilder.CreateSphere('island distant rock',{diameter:rand(18,35),segments:5},this.scene);
       island.position=V(x,-8,z);island.scaling.y=.3;island.material=k%2?m.soil:m.island;island.isPickable=false;
     }
@@ -289,7 +298,7 @@ export class CityWorld {
     }
     // Tiny harbor installations.
     for(let i=0;i<5;i++){
-      this.box('marina pier',[2.6,.5,14],V(-77+i*18,-.35,78),this.materials.soil);
+      this.box('marina pier',[2.6,.5,14],V(-85+i*25,-.35,CITY_HALF_SIZE-5),this.materials.soil);
     }
   }
 
@@ -298,7 +307,7 @@ export class CityWorld {
     const showcase=this.showcaseCount<4&&Math.hypot(x,z)<42;
     if(showcase)this.showcaseCount++;
     const style=Math.floor(rand(0,7)),modern=Math.random()>.55;
-    const floors=Math.floor(rand(3,8))+((i===2||j===2)?1:0);
+    const floors=Math.floor(rand(3,8))+((i===5||j===5)?1:0);
     const width=siteSize*rand(.91,1.03),depth=siteSize*rand(.88,1.03),fh=3.6;
     const offsX=siteSize>=10?rand(-.45,.45):rand(-.13,.13);
     const offsZ=siteSize>=10?rand(-.45,.45):rand(-.13,.13);
@@ -361,7 +370,7 @@ export class CityWorld {
     const m=this.materials;
     // Cars follow low-cost road waypoints with ANIMATED Havok colliders.
     // Colliding disasters switch an affected car to DYNAMIC rigid-body motion.
-    const numberOfCars=this.mobile?12:Math.min(20,Math.max(13,Math.round(this.buildingCount*.85)));
+    const numberOfCars=this.mobile?17:Math.min(30,Math.max(22,Math.round(this.buildingCount*1.1)));
     for(const planned of trafficRoutes(numberOfCars)){
       const {route,distance,speed}=planned;
       const p=positionOnRoute(route,distance),heading=trafficHeading(route,distance);
@@ -379,17 +388,17 @@ export class CityWorld {
       this.props.push({mesh:car,aggregate,type:'car',active:true,
         traffic:{route,distance,speed,state:'driving',heading,lastPosition:V(p.x,1,p.z)}});
     }
-    for(let i=0;i<Math.min(26,Math.max(6,Math.round(this.buildingCount*.95)));i++){
-      const x=choice([-39,-13,13,39])+choice([-4.8,4.8]);
-      const z=rand(-77,77);
+    for(let i=0;i<(this.mobile?38:80);i++){
+      const x=choice(ROAD_COORDS)+choice([-4.8,4.8]);
+      const z=rand(-CITY_HALF_SIZE+12,CITY_HALF_SIZE-12);
       const pole=this.cylinder('street lamp',.13,5.6,V(x,3,z),m.dark,7);
       const lightbox=this.box('lamp head',[1.3,.17,.44],V(x,5.83,z),m.lamp);
       this.box('lamp arm',[.85,.12,.15],V(x+.37,5.58,z),m.dark);
     }
     // City boundary accent and coastline lighting.
-    for(const v of [-85.6,85.6]){
-      this.box('perimeter edge',[171,.4,.46],V(0,.12,v),m.trim);
-      this.box('perimeter edge',[.46,.4,171],V(v,.12,0),m.trim);
+    for(const v of [-CITY_HALF_SIZE+.4,CITY_HALF_SIZE-.4]){
+      this.box('perimeter edge',[CITY_HALF_SIZE*2-1,.4,.46],V(0,.12,v),m.trim);
+      this.box('perimeter edge',[.46,.4,CITY_HALF_SIZE*2-1],V(v,.12,0),m.trim);
     }
     this.makeCrane();
   }
@@ -574,7 +583,7 @@ export class CityWorld {
       this.tossDebris(point,Math.round(1+6*Math.sqrt(strength)),.2+.8*strength);
     }else{
       // Ground/asphalt contact produces real physical chunks and a crater.
-      const asphalt=[-39,-13,13,39].some(v=>Math.abs(point.x-v)<4||Math.abs(point.z-v)<4);
+      const asphalt=ROAD_COORDS.some(v=>Math.abs(point.x-v)<4||Math.abs(point.z-v)<4);
       const material=asphalt?this.materials.road:this.materials.soil;
       const count=Math.round(6+8*strength);
       for(let n=0;n<count&&this.debris.length<this.maxDebris;n++){
@@ -706,7 +715,10 @@ export class CityWorld {
     }
     return mesh;
   }
-  affectLife(kind,center,power,radius,dt){affectCityLife(this,kind,center,power,radius,dt)}
+  affectLife(kind,center,power,radius,dt){
+    affectCityLife(this,kind,center,power,radius,dt);
+    damageDistrictShells(this,kind,center,power,radius,dt);
+  }
   damageTerrain(x,z,k,kind){return applyCrater(this,x,z,k,kind)}
   integrity(){return Math.max(0,Math.round(100*(1-this.brokenFloors/this.totalFloors)))}
   update(dt){

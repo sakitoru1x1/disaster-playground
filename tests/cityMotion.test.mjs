@@ -4,7 +4,7 @@ import {
   makeTrafficRoute,positionOnRoute,trafficHeading,trafficRoutes
 } from '../src/cityMotion.js';
 
-assert.equal(SIDEWALK_COORDS.length,8);
+assert.equal(SIDEWALK_COORDS.length,ROADS.length*2);
 for(let i=0;i<SIDEWALK_COORDS.length;i++){
   for(let j=0;j<SIDEWALK_COORDS.length;j++){
     const p=pedestrianNode(i,j);
@@ -18,13 +18,13 @@ for(let i=0;i<SIDEWALK_COORDS.length;i++){
   }
 }
 const threat={x:0,z:0};
-for(let i=1;i<7;i++)for(let j=1;j<7;j++){
+for(let i=1;i<SIDEWALK_COORDS.length-1;i++)for(let j=1;j<SIDEWALK_COORDS.length-1;j++){
   const picked=choosePedestrianNext(i,j,null,threat,true);
   const longest=Math.max(...pedestrianNeighbors(i,j).map(([a,b])=>
     Math.hypot(SIDEWALK_COORDS[a],SIDEWALK_COORDS[b])));
   assert(Math.abs(Math.hypot(SIDEWALK_COORDS[picked[0]],SIDEWALK_COORDS[picked[1]])-longest)<.001);
 }
-for(let xi=0;xi<3;xi++)for(let zi=0;zi<3;zi++){
+for(let xi=0;xi<ROADS.length-1;xi++)for(let zi=0;zi<ROADS.length-1;zi++){
   const loop=makeTrafficRoute(xi,zi);
   assert(loop.length>50&&loop.length<180,'Unexpected car route length');
   const a=positionOnRoute(loop,0),b=positionOnRoute(loop,loop.length);
@@ -52,4 +52,4 @@ for(const count of [12,19,20]){
     assert(Math.hypot(p.x-q.x,p.z-q.z)>15,'Cars overlap at spawn');
   }
 }
-console.log('CITY_MOTION_PASS: pedestrians navigate 8x8 footpaths; cars follow 9 roundabout-free road circuits');
+console.log('CITY_MOTION_PASS: pedestrians navigate 20x20 footpaths; cars follow 100 roundabout-free road circuits');

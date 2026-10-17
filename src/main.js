@@ -7,6 +7,7 @@ import {CityWorld} from './world.js';
 import {DisasterSystem} from './disasters.js';
 import {WalkController} from './walkController.js';
 import {pauseCityTraffic} from './cityLife.js';
+import {CITY_HALF_SIZE} from './cityLayout.js';
 import {initializeTerrain} from './terrainDamage.js';
 import {PhysicsViewer} from '@babylonjs/core/Debug/physicsViewer';
 import {ShadowGenerator} from '@babylonjs/core/Lights/Shadows/shadowGenerator';
@@ -37,7 +38,7 @@ let simTime=0,lastTick=performance.now(),fpsTimer=0;
 let rebuilding=false,soundsOn=true,qualityHigh=false,cinematic=false;
 let physicsViewer=null;
 let pointerStart=null,targetPoint=null,hovered=false;
-let cameraAngles=[[-Math.PI*.67,1.05,165],[-Math.PI*.52,.66,135],[-Math.PI*.15,1.24,105]];
+let cameraAngles=[[-Math.PI*.67,1.05,320],[-Math.PI*.52,.66,240],[-Math.PI*.15,1.24,150]];
 let cameraIndex=0;
 const labels={meteor:'METEOR STRIKE',tornado:'TORNADO',quake:'EARTHQUAKE',tsunami:'TSUNAMI'};
 const descriptions={meteor:'High-speed impact / blast radius',tornado:'Rotational winds / flying debris',quake:'Seismic disturbance / structural collapse',tsunami:'Coastal surge / mass displacement'};
@@ -165,11 +166,20 @@ function surfacePoint(sx,sy){
       best=info.distance;hitFloor=e;
     }
   }
+  // Peripheral single-body structures can be aimed at, too. A hit to the
+  // facade must not target a patch of ground behind the building.
+  for(const shell of world?.districtShells||[]){
+    if(shell.ruined||shell.mesh.isDisposed())continue;
+    const info=ray.intersectsMesh(shell.mesh,false);
+    if(info?.hit&&info.distance>0&&info.distance<best){
+      best=info.distance;hitFloor=null;p=shell.mesh.getAbsolutePosition().clone();
+    }
+  }
   if(hitFloor){
     const center=hitFloor.mesh.getAbsolutePosition();
     p=new Vector3(center.x,center.y,center.z);
   }
-  if(!Number.isFinite(p.x)||Math.abs(p.x)>86||Math.abs(p.z)>86)return null;
+  if(!Number.isFinite(p.x)||Math.abs(p.x)>CITY_HALF_SIZE||Math.abs(p.z)>CITY_HALF_SIZE)return null;
   return p;
 }
 function pointerCoordinates(e){
@@ -231,13 +241,20 @@ function walkTarget(){
       best=result.distance;hit=part.mesh.getAbsolutePosition().clone();
     }
   }
+  for(const shell of world.districtShells||[]){
+    if(shell.ruined||shell.mesh.isDisposed())continue;
+    const result=ray.intersectsMesh(shell.mesh,false);
+    if(result?.hit&&result.distance>0&&result.distance<best){
+      best=result.distance;hit=shell.mesh.getAbsolutePosition().clone();
+    }
+  }
   if(hit)return hit;
   const t=ray.intersectsPlane(new Plane(0,1,0,0));
   const dist=t!==null&&t>1&&t<100?t:35;
   const point=ray.origin.add(ray.direction.scale(dist));
   point.y=0;
-  point.x=Math.max(-80,Math.min(80,point.x));
-  point.z=Math.max(-80,Math.min(80,point.z));
+  point.x=Math.max(-CITY_HALF_SIZE+5,Math.min(CITY_HALF_SIZE-5,point.x));
+  point.z=Math.max(-CITY_HALF_SIZE+5,Math.min(CITY_HALF_SIZE-5,point.z));
   return point;
 }
 function walkStrike(){if(walk?.enabled&&!walk.survival.dead)deployAt(walkTarget())}
@@ -316,7 +333,7 @@ function togglePhysicsViewer(){
 }
 function surprise(){
   selectTool(['meteor','meteor','tornado','quake','tsunami'][Math.floor(Math.random()*5)]);
-  const p=new Vector3(Math.random()*110-55,0,Math.random()*110-55);
+  const p=new Vector3((Math.random()*2-1)*(CITY_HALF_SIZE-22),0,(Math.random()*2-1)*(CITY_HALF_SIZE-22));
   deployAt(p);
 }
 async function createGame(){
@@ -328,9 +345,9 @@ async function createGame(){
   if(scene){scene.dispose();scene=null;world=null;disasters=null}
   scene=new Scene(engine);
   // Dynamic impact effects need material updates, so retain Babylon's standard priority.
-  camera=new ArcRotateCamera('free orbit camera',-Math.PI*.67,1.05,mobileDevice?130:165,new Vector3(0,10,0),scene);
+  camera=new ArcRotateCamera('free orbit camera',-Math.PI*.67,1.05,mobileDevice?205:320,new Vector3(0,10,0),scene);
   camera.attachControl(canvas,true);
-  camera.lowerRadiusLimit=36;camera.upperRadiusLimit=240;
+  camera.lowerRadiusLimit=36;camera.upperRadiusLimit=450;
   camera.lowerBetaLimit=.18;camera.upperBetaLimit=Math.PI*.47;
   camera.wheelDeltaPercentage=.014;camera.panningSensibility=260;
   camera.angularSensibilityX=mobileDevice?1600:1100;camera.angularSensibilityY=mobileDevice?1600:1100;
@@ -382,7 +399,7 @@ async function createGame(){
     getPerf:()=>({fps:engine.getFps(),drawCalls:engine._drawCalls?.current??null,meshes:scene.meshes.length,activeMeshes:scene.getActiveMeshes().length,activeIndices:scene.getActiveIndices(),hardwareScale:engine.getHardwareScalingLevel(),width:engine.getRenderWidth(),height:engine.getRenderHeight(),shadows:world.shadow.getShadowMap()?.getSize()?.width||0,batching:world.staticBatchStats,mobile:mobileDevice,quality:mobileDevice?(qualityHigh?'SHARP':'MOBILE'):(qualityHigh?'ULTRA':'PERF')}),
     getState:()=>({terrainDeformations:world.terrainDeformations,craters:world.terrainCraters.length,
       ...world.progression.stats(),fps:engine.getFps(),buildings:world.buildings.length,requestedBuildings:buildingCount,floors:world.totalFloors,broken:world.brokenFloors,
-    activeBodies:world.activeBodies,impacts:world.impactCount,integrity:world.integrity(),activeEffects:disasters.effects.length,craneJointActive:!!world.crane,fragments:world.fragments.length,shadowMapSize:world.shadow.getShadowMap()?.getSize().width,pendingFailures:world.pendingFailures.length,slabFractures:world.slabFractures.length,slabSplitCounts:world.slabFractures.slice(-30).map(s=>s.requestedParts),slabPhysicalParts:world.slabFractures.reduce((a,s)=>a+s.physicalParts,0),slabStaticParts:world.slabFractures.reduce((a,s)=>a+s.staticParts,0),
+    districtShells:world.districtShells.length,districtShellsCollapsed:world.districtShellsCollapsed,cityWidth:CITY_HALF_SIZE*2,activeBodies:world.activeBodies,impacts:world.impactCount,integrity:world.integrity(),activeEffects:disasters.effects.length,craneJointActive:!!world.crane,fragments:world.fragments.length,shadowMapSize:world.shadow.getShadowMap()?.getSize().width,pendingFailures:world.pendingFailures.length,slabFractures:world.slabFractures.length,slabSplitCounts:world.slabFractures.slice(-30).map(s=>s.requestedParts),slabPhysicalParts:world.slabFractures.reduce((a,s)=>a+s.physicalParts,0),slabStaticParts:world.slabFractures.reduce((a,s)=>a+s.staticParts,0),
     fallingVisual:world.visualFragments.length,
     retainedShards:scene.meshes.filter(m=>m.metadata?.retained).length,
     floatingSettledSlabs:world.rubble.filter(m=>!m.isDisposed()&&m.metadata?.kind==='slab'&&m.position.y>5).length,

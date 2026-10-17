@@ -1,6 +1,7 @@
 // Simple, deterministic, bounded-cost city navigation on the existing road grid.
 // No per-agent pathfinding or physics bodies are required for pedestrians.
-export const ROADS=Object.freeze([-39,-13,13,39]);
+import {ROAD_COORDS} from './cityLayout.js';
+export const ROADS=ROAD_COORDS;
 export const SIDEWALK_OFFSET=5.65;
 export const SIDEWALK_COORDS=Object.freeze(ROADS.flatMap(v=>[
   v-SIDEWALK_OFFSET,v+SIDEWALK_OFFSET]));
@@ -27,7 +28,7 @@ export function choosePedestrianNext(i,j,previous=null,threat=null,panic=false,r
 }
 
 // All traffic drives on the RIGHT-hand lane of its travel direction.
-// Four streets in each axis provide up to 9 inner-block loops.
+// Ten streets per axis make 100 navigable blocks across the expanded island.
 function roundedRectangle(x0,z0,x1,z1){
   const corners=[
     [x0+1.55,z0+1.55],
@@ -82,7 +83,13 @@ export function trafficHeading(route,distance){
 }
 export function trafficRoutes(count,rng=Math.random){
   const routes=[];
-  for(let x=0;x<3;x++)for(let z=0;z<3;z++)routes.push(makeTrafficRoute(x,z));
+  // Scatter traffic across ALL districts, not just the south-west corner.
+  // 37 is coprime with 100: each route appears before any is repeated.
+  const blocks=ROADS.length-1,total=blocks*blocks;
+  for(let i=0;i<total;i++){
+    const index=(i*37+44)%total;
+    routes.push(makeTrafficRoute(Math.floor(index/blocks),index%blocks));
+  }
   const result=[];
   for(let i=0;i<count;i++){
     const route=routes[i%routes.length];

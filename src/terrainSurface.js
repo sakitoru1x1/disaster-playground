@@ -1,4 +1,5 @@
 import {Mesh,VertexData,VertexBuffer} from '@babylonjs/core';
+import {BLOCK_COORDS,ROAD_COORDS,CITY_HALF_SIZE,isPark} from './cityLayout.js';
 
 // Original streets were long, six-sided boxes. With only 8 vertices apiece,
 // their center stayed completely flat across a crater. These are tessellated
@@ -14,28 +15,32 @@ const hasHole=(x,z,craters)=>{
  return false;
 };
 export function roadSurfaceSpecs(){
- const roads=[-39,-13,13,39],asphalt=[],sidewalk=[],paint=[],grass=[];
+ const roads=ROAD_COORDS,asphalt=[],sidewalk=[],paint=[],grass=[];
+ const length=CITY_HALF_SIZE*2-12;
+ const limit=CITY_HALF_SIZE-8;
  for(const x of roads){
-  asphalt.push(rect(x,0,7,161,.102));
-  paint.push(rect(x-3.34,0,.12,161,.124),rect(x+3.34,0,.12,161,.124));
-  for(let z=-77;z<79;z+=12)paint.push(rect(x,z,.16,4.3,.14));
+  asphalt.push(rect(x,0,7,length,.102));
+  paint.push(rect(x-3.34,0,.12,length,.124),rect(x+3.34,0,.12,length,.124));
+  for(let z=-limit;z<limit;z+=12)paint.push(rect(x,z,.16,4.3,.14));
  }
  for(const z of roads){
-  asphalt.push(rect(0,z,161,7,.154));
-  paint.push(rect(0,z-3.34,161,.12,.165),rect(0,z+3.34,161,.12,.165));
-  for(let x=-77;x<79;x+=12)paint.push(rect(x,z,4.3,.15,.194));
+  asphalt.push(rect(0,z,length,7,.154));
+  paint.push(rect(0,z-3.34,length,.12,.165),rect(0,z+3.34,length,.12,.165));
+  for(let x=-limit;x<limit;x+=12)paint.push(rect(x,z,4.3,.15,.194));
  }
- for(const x of [-52,-26,0,26,52])for(const z of [-52,-26,0,26,52]){
+ for(const x of BLOCK_COORDS)for(const z of BLOCK_COORDS){
   sidewalk.push(rect(x,z,18.6,18.6,.28));
-  if((x===-26&&z===26)||(x===26&&z===-26)||(x===0&&z===0))
-   grass.push(rect(x,z,16,16,.405));
+  if(isPark(x,z))grass.push(rect(x,z,16,16,.405));
  }
  return {asphalt,sidewalk,paint,grass};
 }
 function makeSurface(world,name,regions,material){
  const vertices=[],uv=[],triangles=[];
  for(const r of regions){
-  const sx=Math.max(1,Math.ceil(r.w/cell)),sz=Math.max(1,Math.ceil(r.l/cell));
+   // Use fine paving near active central blocks, coarser tessellation on
+   // remote districts. This cuts crater rebuild cost on the 3.3x map.
+   const step=Math.hypot(r.x,r.z)>65?2.45:cell;
+   const sx=Math.max(1,Math.ceil(r.w/step)),sz=Math.max(1,Math.ceil(r.l/step));
   for(let j=0;j<sz;j++)for(let i=0;i<sx;i++){
    const x0=r.x-r.w/2+i*r.w/sx,x1=r.x-r.w/2+(i+1)*r.w/sx;
    const z0=r.z-r.l/2+j*r.l/sz,z1=r.z-r.l/2+(j+1)*r.l/sz;

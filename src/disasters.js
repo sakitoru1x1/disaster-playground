@@ -6,6 +6,7 @@ import {blowBody,activateWindRubble} from './windPhysics.js';
 import {tornadoDamagePerSecond} from './structuralDamage.js';
 import {meteorPower,meteorScale,meteorWaveDamage,meteorHitDistribution} from './meteorBalance.js';
 import {severity,level,quakeDamage,quakeShake,tsunamiDamage,tsunamiHeight} from './disasterBalance.js';
+import {CITY_HALF_SIZE} from './cityLayout.js';
 const V=(x,y,z)=>new Vector3(x,y,z);
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(a,l,h)=>Math.max(l,Math.min(h,a));
@@ -29,7 +30,7 @@ export class DisasterSystem{
   get strength(){return this.lastStrength||.75}
   deploy(type,position,intensity=.75){
     const p=position.clone();
-    p.x=clamp(p.x,-75,75);p.z=clamp(p.z,-75,75);
+    p.x=clamp(p.x,-CITY_HALF_SIZE+9,CITY_HALF_SIZE-9);p.z=clamp(p.z,-CITY_HALF_SIZE+9,CITY_HALF_SIZE-9);
     const strength=type==='meteor'?meteorPower(intensity):type==='tornado'?clamp(intensity,.15,1):severity(intensity);
     this.lastStrength=strength;
     this.world.impactCount++;
@@ -352,16 +353,16 @@ export class DisasterSystem{
     const root=new TransformNode('TSUNAMI WATER MASS',scene);
     const surface=this.material('translucent tidal front','#58a9c9',.58,'#235d83');
     const crest=this.material('whitecaps','#dcf5f1',.65,'#bfe9e5');
-    const face=MeshBuilder.CreateBox('tsunami moving wall',{width:4,height:waveHeight,depth:164},scene);
+    const face=MeshBuilder.CreateBox('tsunami moving wall',{width:4,height:waveHeight,depth:CITY_HALF_SIZE*2+6},scene);
     face.position=V(0,waveHeight*.5,0);face.material=surface;face.parent=root;face.isPickable=false;
-    const lip=MeshBuilder.CreateBox('tsunami frothing crest',{width:6,height:Math.max(.5,waveHeight*.08),depth:168},scene);
+    const lip=MeshBuilder.CreateBox('tsunami frothing crest',{width:6,height:Math.max(.5,waveHeight*.08),depth:CITY_HALF_SIZE*2+10},scene);
     lip.position=V(-1.5,waveHeight,0);lip.material=crest;lip.parent=root;lip.isPickable=false;
-    const flood=MeshBuilder.CreateBox('water wake',{width:1,height:1.7,depth:164},scene);
+    const flood=MeshBuilder.CreateBox('water wake',{width:1,height:1.7,depth:CITY_HALF_SIZE*2+6},scene);
     flood.position=V(-1,.15,0);flood.material=this.material('wash water','#69bfd3',.33,'#387c96');
     flood.parent=root;flood.isPickable=false;
-    root.position=V(-85,0,0);
+    root.position=V(-CITY_HALF_SIZE,0,0);
     this.effects.push({type:'tsunami',root,face,lip,flood,age:0,duration:8+strength*4,
-      strength,origin:position.clone(),lastX:-87,lastSpray:0,
+      strength,origin:position.clone(),lastX:-CITY_HALF_SIZE-2,lastSpray:0,
       waveHeight,damaged:new Set(),broken:0,level:level(strength)});
     if(strength>.8)w.massBlastActive=true;
     this.emitSound('wind',Math.max(.2,strength));
@@ -581,19 +582,19 @@ export class DisasterSystem{
         const pos=part.mesh.getAbsolutePosition();
         part.aggregate.body.applyImpulse(V(rand(-5,5)*k,rand(0,4)*k,rand(-5,5)*k),pos);
       }
-      w.affectLife?.('quake',p,k,160,.12);
+      w.affectLife?.('quake',p,k,CITY_HALF_SIZE*1.4,.12);
     }
     this.shake=Math.max(this.shake,quakeShake(k));
   }
 
   tickTsunami(fx,dt){
     const w=this.world,k=fx.strength;
-    const front=-85+170*clamp(fx.age/fx.duration,0,1);
+    const front=-CITY_HALF_SIZE+CITY_HALF_SIZE*2*clamp(fx.age/fx.duration,0,1);
     fx.root.position.x=front;
     fx.face.rotation.z=Math.sin(fx.age*2)*.03;
     fx.lip.position.y=fx.waveHeight+Math.sin(fx.age*5)*.6;
-    fx.flood.scaling.x=Math.max(1,(front+85)/2);
-    fx.flood.position.x=-(front+85)/2;
+    fx.flood.scaling.x=Math.max(1,(front+CITY_HALF_SIZE)/2);
+    fx.flood.position.x=-(front+CITY_HALF_SIZE)/2;
     let released=0;
     for(const entry of w.structures){
       if(entry.active||fx.damaged.has(entry))continue;

@@ -1,6 +1,7 @@
 import {MeshBuilder, PhysicsAggregate, PhysicsShapeType, Vector3} from '@babylonjs/core';
 import {meteorScale} from './meteorBalance.js';
 import {PhysicalRagdoll} from './physicalRagdoll.js';
+import {CITY_HALF_SIZE} from './cityLayout.js';
 
 // Player is one real Havok rigid body. All impulses and collisions happen in
 // the existing world; health / drowning / balance are gameplay rules.
@@ -138,7 +139,7 @@ export class PlayerSurvival {
       }else if(fx.type==='tsunami'){
         const front=fx.root.position.x;
         const relative=front-p.x;
-        if(relative< -6||relative>30||Math.abs(p.z)>82)continue;
+        if(relative< -6||relative>30||Math.abs(p.z)>CITY_HALF_SIZE-4)continue;
         const k=fx.strength, f=relative<3?clamp((relative+6)/9,0,1):
           clamp((30-relative)/27,0,1);
         const active=f*k;

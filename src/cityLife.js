@@ -38,7 +38,7 @@ export function populateCityLife(world){
 
   // A connected grid of safe footpaths around the 26m city blocks.
   // Pedestrians cross at intersections and turn instead of standing in place.
-  const count=world.mobile?14:Math.max(22,Math.min(30,Math.round(world.buildingCount*1.15)));
+  const count=world.mobile?22:Math.max(40,Math.min(55,Math.round(world.buildingCount*1.8)));
   for(let i=0;i<count;i++){
     const nodeI=Math.floor(Math.random()*SIDEWALK_COORDS.length);
     const nodeJ=Math.floor(Math.random()*SIDEWALK_COORDS.length);

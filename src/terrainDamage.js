@@ -2,6 +2,8 @@ import {
  MeshBuilder,VertexBuffer,VertexData,PhysicsAggregate,PhysicsShapeType,PhysicsMotionType,Vector3
 } from '@babylonjs/core';
 import {reshapeCitySurfaceSkins,reshapeLooseDecorations} from './terrainSurface.js';
+import {CITY_HALF_SIZE} from './cityLayout.js';
+import {damageDistrictShells} from './cityDistricts.js';
 
 const clamp=(x,lo,hi)=>Math.min(hi,Math.max(lo,x));
 const dist=(x,z,c)=>Math.hypot(x-c.x,z-c.z);
@@ -104,6 +106,13 @@ export function applyCrater(world,x,z,power=1,kind='meteor'){
     foundation.mesh.position,'terrain');
   }
  }
+ // The new low-cost peripheral structures must not remain suspended above
+ // excavated foundations. A crater can topple their single rigid body.
+ for(const shell of world.districtShells||[]){
+  if(!shell.ruined&&Math.hypot(shell.x-x,shell.z-z)<c.radius*.72)
+   shell.damage=Math.max(shell.damage,.86);
+ }
+ damageDistrictShells(world,kind,new Vector3(x,0,z),Math.max(.7,k),c.radius,.3);
  world.terrainDeformations=(world.terrainDeformations||0)+1;
  return c;
 }
@@ -116,7 +125,7 @@ export function initializeTerrain(world){
  // A fairly fine terrain mesh keeps the visual crater close to Havok's shape.
  // About 6.5k vertices total — substantially cheaper than voxel excavation.
  const mesh=MeshBuilder.CreateGround('deformable Havok terrain',
-   {width:172,height:172,subdivisions:80,updatable:true},world.scene);
+   {width:CITY_HALF_SIZE*2,height:CITY_HALF_SIZE*2,subdivisions:132,updatable:true},world.scene);
  mesh.position.y=0;
  mesh.material=world.materials.island;
  mesh.receiveShadows=true;mesh.isPickable=true;

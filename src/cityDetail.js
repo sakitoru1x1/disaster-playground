@@ -1,4 +1,5 @@
 import {Mesh,VertexData,Vector3,Color3,StandardMaterial} from '@babylonjs/core';
+import {BLOCK_COORDS,ROAD_COORDS} from './cityLayout.js';
 
 // All fine details are baked into vertex-colored meshes: one draw per floor,
 // one draw per vehicle, and one draw for the entire street furniture layer.
@@ -141,7 +142,7 @@ export function detailBuildingFloor(world,entry,options={}){
 export function detailStreets(world){
   const pieces=[];
   const push=(x,y,z,w,h,d,c)=>coloredBox(pieces,x,y,z,w,h,d,c);
-  const roads=[-39,-13,13,39];
+  const roads=ROAD_COORDS;
   for(const roadX of roads)for(const roadZ of roads){
     for(const shift of [-6.3,6.3]){
       // Crosswalk bars across X-direction lanes.
@@ -156,7 +157,7 @@ export function detailStreets(world){
       push(roadX+dx,.168,roadZ+dz,.55,.018,.37,palette.drain);
   }
   // Stencilled loading bays and stop lines, away from all moving cars.
-  for(const road of roads)for(const a of [-65,-52,-26,0,26,52,65]){
+  for(const road of roads)for(const a of BLOCK_COORDS){
     push(road+3.07,.114,a,.1,.019,3.45,palette.paving);
     push(a,.166,road-3.08,3.45,.019,.10,palette.paving);
   }
