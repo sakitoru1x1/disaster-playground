@@ -505,6 +505,8 @@ async function createGame(){
       deformations:world.terrainDeformations,craters:world.terrainCraters.slice(),
       clippedTiles:world.terrainClippedTiles||0,warpedVertices:world.terrainWarpedVertices||0,
       skins:(world.terrainSkins||[]).map(m=>({name:m.name,vertices:m.getTotalVertices(),
+        firstNormalY:m.getVerticesData('normal')?.[1]??null,
+        enabled:m.isEnabled(),culled:m.material.backFaceCulling,
         visibleTriangles:m.getIndices().length/3,
         totalTriangles:m.metadata.terrainOriginalIndices.length/3})),
       trees:world.trees.slice(0,12).map(t=>({x:t.root.position.x,y:t.root.position.y,z:t.root.position.z})),

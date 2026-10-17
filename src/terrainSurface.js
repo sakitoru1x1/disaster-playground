@@ -42,7 +42,10 @@ function makeSurface(world,name,regions,material){
    const b=vertices.length/3;
    vertices.push(x0,r.y,z0,x0,r.y,z1,x1,r.y,z1,x1,r.y,z0);
    uv.push(i/sx,j/sz,i/sx,(j+1)/sz,(i+1)/sx,(j+1)/sz,(i+1)/sx,j/sz);
-   triangles.push(b,b+1,b+2,b,b+2,b+3);
+   // Babylon's ground faces use the opposite winding from the initial
+   // street-skin implementation. The old order made all normals point DOWN
+   // and back-face culling hid every road when viewed from above.
+   triangles.push(b,b+2,b+1,b,b+3,b+2);
   }
  }
  const data=new VertexData();
@@ -85,7 +88,9 @@ export function reshapeCitySurfaceSkins(world,craters,heightAt){
   const triangles=[],old=mesh.metadata.terrainOriginalIndices;
   // Four vertices / quad, six indices / quad.
   for(let i=0;i<old.length;i+=6){
-   const a=old[i]*3,b=old[i+2]*3;
+   // Vertex 0 and 2 are the diagonal of each four-vertex paving quad;
+   // winding order must not change which area gets clipped out.
+   const a=old[i]*3,b=(old[i]+2)*3;
    const centerX=(original[a]+original[b])*.5;
    const centerZ=(original[a+2]+original[b+2])*.5;
    if(hasHole(centerX,centerZ,craters)){clipped++;continue}

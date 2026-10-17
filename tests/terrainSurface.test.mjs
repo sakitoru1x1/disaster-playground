@@ -8,6 +8,17 @@ const mat=()=>new StandardMaterial('test surface',scene);
 const world={scene,materials:{road:mat(),sidewalk:mat(),marking:mat(),grass:mat()}};
 const skins=buildCitySurfaceSkins(world);
 assert.equal(skins.length,4,'Road, pavement, paint and parks each need one batched mesh');
+// REGRESSION: after introducing tessellated meshes, all roads vanished because
+// their triangle winding produced downward normals and standard materials
+// back-face-culled every surface when viewed from above.
+for(const mesh of skins){
+  const normals=mesh.getVerticesData(VertexBuffer.NormalKind);
+  assert(normals.length>0,'No normal vectors for '+mesh.name);
+  for(let i=1;i<normals.length;i+=3)
+    assert(normals[i]>.99,mesh.name+' faces DOWN and is invisible from the street');
+  assert(mesh.material.backFaceCulling!==false,
+    'Do not mask broken triangle winding by disabling face culling');
+}
 const initial=skins.map(m=>m.getIndices().length);
 const c={x:-13,z:-13,radius:19,depth:3.2,kind:'meteor'};
 const first=reshapeCitySurfaceSkins(world,[c],groundHeightAt);
