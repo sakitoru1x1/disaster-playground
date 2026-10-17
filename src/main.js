@@ -501,6 +501,15 @@ async function createGame(){
       asphaltTexture:!!world.materials.road.diffuseTexture,
       pavementTexture:!!world.materials.sidewalk.diffuseTexture,
       sun:world.sun.intensity,ambient:world.hemi.intensity}),
+    getTerrainDebug:()=>({
+      deformations:world.terrainDeformations,craters:world.terrainCraters.slice(),
+      clippedTiles:world.terrainClippedTiles||0,warpedVertices:world.terrainWarpedVertices||0,
+      skins:(world.terrainSkins||[]).map(m=>({name:m.name,vertices:m.getTotalVertices(),
+        visibleTriangles:m.getIndices().length/3,
+        totalTriangles:m.metadata.terrainOriginalIndices.length/3})),
+      trees:world.trees.slice(0,12).map(t=>({x:t.root.position.x,y:t.root.position.y,z:t.root.position.z})),
+      people:world.civilians.slice(0,15).map(p=>({x:p.root.position.x,y:p.root.position.y,z:p.root.position.z}))
+    }),
     getWalk:()=>walk?.info(),
     getPlayerState:()=>walk?.survival.dieState(),
     respawnPlayer:()=>respawnPlayer(),

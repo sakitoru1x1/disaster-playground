@@ -3,10 +3,10 @@
 Scope: five gameplay systems delivered locally, built on existing Babylon.js + Havok.
 
 ## 9. Destructible terrain
-- An editable 48×48-division terrain mesh replaces the original flat ground collision box.
+- An editable 80×80-division terrain mesh replaces the original flat ground collision box; coarse 48×48 terrain was superseded after the street-surface bug report.
 - Static Havok **MESH** collision is rebuilt after crater formation, so a player can fall into depressions rather than walking on an invisible flat collider.
 - Meteor impacts leave radius/depth-scaled depressions with ejecta rims. Strong earthquakes also deform terrain and produce pavement cracks.
-- Road geometry is bent to follow ground deformation. Foundations directly affected by a crater take structural damage; the existing building-cascade logic handles falling storeys.
+- Roads, lane paint, sidewalks and grass are now tessellated with ~1.65m quads. Craters **cut out** triangles inside the hole and lower surrounding border vertices, rather than leaving giant rigid asphalt slabs above the real ground. Ground vertex colors darken exposed soil. Tree and pedestrian heights follow the new ground profile. Foundations directly affected by a crater take structural damage; the existing building-cascade logic handles falling storeys.
 - Crater impacts accumulate (up to seven tracked). The old island collision roof is removed and decorative bedrock placed below the depression range.
 - Limitation: grid terrain and procedurally warped asphalt, **not** voxel excavation or liquid physics. Individual pavement meshes are not separate Havok fracture bodies.
 

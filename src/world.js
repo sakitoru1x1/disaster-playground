@@ -10,6 +10,7 @@ import {populateCityLife,affectCityLife,updateCityLife} from './cityLife.js';
 import {trafficRoutes,positionOnRoute,trafficHeading} from './cityMotion.js';
 import {CityProgression} from './cityProgression.js';
 import {applyCrater} from './terrainDamage.js';
+import {buildCitySurfaceSkins} from './terrainSurface.js';
 import {planCity} from './cityLayout.js';
 import {makeFacadeWindows,compactSettledRubble} from './perfGeometry.js';
 import {applyVisualArtDirection,addShowcaseFloor,addShowcasePlaza,addShowcaseContact,addShowcaseEntrance,addDistrictContacts} from './visualPass.js';
@@ -101,6 +102,7 @@ export class CityWorld {
     prepareCityDetails(this);
     this.makeSky();
     this.makeTerrain();
+    buildCitySurfaceSkins(this);
     detailStreets(this);
     addShowcasePlaza(this);
     this.makeDistricts();
@@ -201,26 +203,16 @@ export class CityWorld {
       const ring=MeshBuilder.CreateTorus('coastal surf '+i,{diameter:176+i*5,thickness:.2+i*.06,tessellation:96},this.scene);
       ring.scaling.z=1;ring.position.y=-3.12+i*.012;ring.material=this.mat('surf foam '+i,'#b8dedd',{emissive:'#7fb7c6',alpha:.48-i*.08});ring.isPickable=false;
     }
-    const roads=[-39,-13,13,39];
-    for(const x of roads){
-      const road=this.box('north south avenue',[7,.06,161],V(x,.07,0),m.road);road.receiveShadows=true;
-      const crossing=this.box('avenue edge',[.12,.065,161],V(x-3.34,.09,0),m.marking);
-      this.box('avenue edge',[.12,.065,161],V(x+3.34,.09,0),m.marking);
-      for(let z=-77;z<79;z+=12)this.box('dashed lane',[.16,.07,4.3],V(x,.105,z),m.marking);
-    }
-    for(const z of roads){
-      const road=this.box('east west avenue',[161,.075,7],V(0,.115,z),m.road);road.receiveShadows=true;
-      this.box('avenue edge',[161,.09,.12],V(0,.12,z-3.34),m.marking);
-      this.box('avenue edge',[161,.09,.12],V(0,.12,z+3.34),m.marking);
-      for(let x=-77;x<79;x+=12)this.box('dashed lane',[4.3,.08,.15],V(x,.148,z),m.marking);
-    }
+    // Asphalt, lane paint and sidewalk paving are now tessellated surface
+    // skins (terrainSurface.js), NOT giant unbreakable six-faced boxes.
+    // This lets a meteor genuinely excavate the road instead of showing an
+    // unchanged asphalt sheet while the physics capsule falls underneath it.
     // District plots and subtle grassy courtyards.
     const coords=[-52,-26,0,26,52];
     for(let i=0;i<5;i++)for(let j=0;j<5;j++){
       const x=coords[i],z=coords[j];
-      const platform=this.box('city block',[18.6,.3,18.6],V(x,.13,z),m.sidewalk);platform.receiveShadows=true;
       if((i===1&&j===3)||(i===3&&j===1)||(i===2&&j===2)){
-        const grass=this.box('district park',[16,.11,16],V(x,.35,z),m.grass);grass.receiveShadows=true;
+        // Park grass lives in the deformable landscape skin, not a rigid plate.
         if(i===2&&j===2){
           const plaza=this.cylinder('central fountain basin',8,.72,V(x,.7,z),m.trim,36);
           const pond=this.cylinder('fountain water',6.7,.12,V(x,1.11,z),m.water,36);

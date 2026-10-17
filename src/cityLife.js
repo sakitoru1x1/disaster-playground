@@ -2,6 +2,7 @@ import {
   MeshBuilder,Vector3,Quaternion,TransformNode,DynamicTexture,Texture,Mesh,PhysicsAggregate,
   PhysicsShapeType,PhysicsMotionType
 } from '@babylonjs/core';
+import {terrainDisplacement} from './terrainDamage.js';
 import {
   pedestrianNode,choosePedestrianNext,
   positionOnRoute,trafficHeading,SIDEWALK_COORDS
@@ -282,11 +283,17 @@ export function updateTraffic(world,dt){
     const actualStep=dt*(slow?.35:1);
     const actualDist=t.distance+t.speed*actualStep;
     const destination=positionOnRoute(t.route,actualDist);
+    const groundDelta=terrainDisplacement(destination.x,destination.z,world.terrainCraters||[]);
+    if(groundDelta<-.86){
+      // Kinematic vehicles cannot cross a hole as if the old street still exists.
+      releaseTrafficCar(car);
+      continue;
+    }
     if(blockedByAnotherCar(world,car,destination))continue;
     t.distance=actualDist;
     t.heading=trafficHeading(t.route,t.distance);
     const q=Quaternion.FromEulerAngles(0,t.heading,0);
-    tempPosition.set(destination.x,1,destination.z);
+    tempPosition.set(destination.x,1+groundDelta,destination.z);
     car.aggregate.body.setTargetTransform(tempPosition,q);
     t.lastPosition.copyFrom(tempPosition);
   }
@@ -295,6 +302,13 @@ export function updateCityLife(world,dt){
   updateTraffic(world,dt);
   for(const person of world.civilians){
     walkPedestrian(person,dt);
+    const displacement=terrainDisplacement(person.root.position.x,person.root.position.z,
+      world.terrainCraters||[]);
+    // Walking, injured, sheltering and dead citizens must all remain on the
+    // same physical terrain that the player collides with.
+    const stance=person.state==='dead'?.4:person.state==='injured'?.15:
+      person.state==='sheltering'?.07:PED_BASE_Y+Math.abs(Math.sin(person.walked))* .025;
+    person.root.position.y=stance+displacement;
     if(person.state==='dead')continue;
     // Falling debris and wrecked vehicles can also strike pedestrians.
     if(world.time%1<dt*4&&world.fragments.length){

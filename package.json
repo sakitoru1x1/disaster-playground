@@ -11,6 +11,7 @@
     "test:city": "node tests/cityMotion.test.mjs",
     "test:graphics": "node tests/cityDetail.test.mjs",
     "test:evolution": "node tests/cityEvolution.test.mjs",
+    "test:terrain": "node tests/terrainSurface.test.mjs",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
