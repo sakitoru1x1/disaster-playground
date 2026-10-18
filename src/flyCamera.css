@@ -1,0 +1,38 @@
+/* Unrestricted spectator flight. The canvas remains tap-to-strike enabled. */
+#flyBtn.is-active{background:#e6af7026;border-color:#e9b47a;color:#ffdda7}
+#flyControls{display:none;position:absolute;z-index:10;pointer-events:auto;
+ align-items:flex-end;gap:14px;left:14px;bottom:110px;touch-action:none;
+ -webkit-user-select:none;user-select:none}
+.fly-pad{display:grid;grid-template-columns:repeat(3,42px);grid-template-rows:repeat(3,42px);
+ gap:4px;align-items:center;justify-items:center}
+.fly-pad button:nth-child(1){grid-column:2;grid-row:1}
+.fly-pad button:nth-child(2){grid-column:1;grid-row:2}
+.fly-pad button:nth-child(3){grid-column:2;grid-row:3}
+.fly-pad button:nth-child(4){grid-column:3;grid-row:2}
+#flyControls button{border:1px solid #efc28b80;background:#0a2234d9;
+ color:#f7d09b;border-radius:9px;font-size:22px;font-weight:800;
+ width:42px;height:42px;display:grid;place-items:center;
+ touch-action:none;-webkit-tap-highlight-color:transparent;box-shadow:0 6px 20px #0007}
+#flyControls button:active{background:#da9c5366;border-color:#ffd399}
+.fly-altitude{display:flex;flex-direction:column;gap:10px;padding-bottom:6px}
+.fly-altitude button{width:58px!important;height:46px!important;font-size:10px!important;letter-spacing:.5px}
+@media (pointer:coarse){
+ .fly-mode #flyControls{display:flex}
+}
+@media (max-width:600px){
+ .fly-mode #flyControls{bottom:calc(105px + env(safe-area-inset-bottom));left:9px}
+ .fly-pad{grid-template-columns:repeat(3,39px);grid-template-rows:repeat(3,39px)}
+ #flyControls button{width:39px;height:39px}
+ .fly-altitude button{height:41px!important}
+ .topbar #flyBtn{display:grid!important}
+}
+@media (max-height:480px) and (orientation:landscape){
+ .fly-mode #flyControls{bottom:calc(87px + env(safe-area-inset-bottom));left:7px;gap:8px}
+ .fly-pad{grid-template-columns:repeat(3,35px);grid-template-rows:repeat(3,35px);gap:3px}
+ #flyControls button{width:35px;height:35px;font-size:19px}
+ .fly-altitude button{width:51px!important;height:38px!important}
+}
+/* The button remains available in narrow portrait where preset CAMERA hides. */
+@media (max-width:370px) and (orientation:portrait){
+ .topbar #flyBtn{min-width:34px;width:34px;padding:0}
+}

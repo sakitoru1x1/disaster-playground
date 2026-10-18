@@ -2,7 +2,7 @@ import {
   MeshBuilder, StandardMaterial, PBRMaterial, Color3, Color4, Vector3, Texture,
   DynamicTexture, PhysicsAggregate, PhysicsShapeType, PhysicsMotionType, BallAndSocketConstraint, Quaternion, TransformNode, ShadowGenerator,
   HemisphericLight, DirectionalLight, GlowLayer, PointLight, ParticleSystem,
-  Animation, VertexBuffer, Mesh, Matrix
+  Animation, VertexBuffer, Mesh, Matrix, Layer
 } from '@babylonjs/core';
 import {fractureStorey} from './fracture.js';
 import {splitOnCollision,splitVisualOnLanding,queueSecondaryFracture,canVisuallyFracture} from './secondaryFracture.js';
@@ -177,19 +177,27 @@ export class CityWorld {
   }
 
   makeSky(){
-    const t=new DynamicTexture('sky gradient',{width:8,height:512},this.scene,false);
-    const ctx=t.getContext();
+    // A camera-independent screen background, not a finite 900m sphere.
+    // The old inverted sphere became a gigantic visible dome/horizon when
+    // zooming out or flying through its shell.
+    const texture=new DynamicTexture('infinite sky gradient',
+      {width:16,height:512},this.scene,false);
+    const ctx=texture.getContext();
     const g=ctx.createLinearGradient(0,0,0,512);
-    g.addColorStop(0,'#314d68');g.addColorStop(.38,'#7193ad');g.addColorStop(.68,'#bad3d7');g.addColorStop(.82,'#f5d4ae');g.addColorStop(1,'#debea6');
-    ctx.fillStyle=g;ctx.fillRect(0,0,8,512);t.update();
-    const sky=MeshBuilder.CreateSphere('atmosphere',{diameter:900,segments:24,sideOrientation:Mesh.BACKSIDE},this.scene);
-    sky.material=this.mat('sky material','#ffffff',{disableLighting:true,backFaceCulling:false});
-    sky.material.emissiveTexture=t;sky.material.diffuseTexture=t;
-    sky.isPickable=false;sky.infiniteDistance=true;sky.applyFog=false;
-    const sunDisc=MeshBuilder.CreateSphere('sun halo',{diameter:31,segments:20},this.scene);
-    sunDisc.position=V(-255,185,110);
-    sunDisc.material=this.mat('solar disc','#fff4da',{emissive:'#ffeac2',disableLighting:true});
-    sunDisc.isPickable=false;sunDisc.applyFog=false;
+    g.addColorStop(0,'#314d68');
+    g.addColorStop(.40,'#7697b2');
+    g.addColorStop(.71,'#bad2d5');
+    g.addColorStop(.88,'#eacdb5');
+    g.addColorStop(1,'#e3c39f');
+    ctx.fillStyle=g;ctx.fillRect(0,0,16,512);texture.update();
+    texture.wrapU=Texture.CLAMP_ADDRESSMODE;
+    texture.wrapV=Texture.CLAMP_ADDRESSMODE;
+    texture.hasAlpha=false;
+    const backdrop=new Layer('infinite sky backdrop',null,this.scene,true);
+    backdrop.texture=texture;
+    backdrop.isBackground=true;
+    this.skyBackdrop=backdrop;
+    this.scene.clearColor=new Color4(.48,.60,.69,1);
   }
 
   makeTerrain(){

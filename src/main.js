@@ -8,6 +8,7 @@ import {DisasterSystem} from './disasters.js';
 import {RescueMarkers} from './rescueMarkers.js';
 import {RecordedSoundscape} from './recordedAudio.js';
 import {WalkController} from './walkController.js';
+import {FlyController} from './flyController.js';
 import {pauseCityTraffic,cityClock,citizenStats} from './cityLife.js';
 import {CITY_HALF_SIZE} from './cityLayout.js';
 import {initializeTerrain} from './terrainDamage.js';
@@ -19,6 +20,7 @@ import './walk.css';
 import './playerSurvival.css';
 import './survivorHelp.css';
 import './rescueMarkers.css';
+import './flyCamera.css';
 
 const $=selector=>document.querySelector(selector);
 const $$=selector=>[...document.querySelectorAll(selector)];
@@ -32,7 +34,7 @@ const engine=new Engine(canvas,true,{stencil:true,preserveDrawingBuffer:false,al
   antialias:true,powerPreference:'high-performance'});
 engine.setHardwareScalingLevel(mobileDevice?mobileResolutionFactor:
   Math.max(1.55,window.devicePixelRatio*1.15));
-let scene,camera,world,disasters,pipeline,walk=null;
+let scene,camera,world,disasters,pipeline,walk=null,fly=null;
 let havoc=null;
 let selected='meteor',power=.75,paused=false,speed=1;
 let buildingCount=mobileDevice?10:22;
@@ -164,13 +166,14 @@ function callbacks(){
 }
 function surfacePoint(sx,sy){
   if(!scene||!camera)return null;
-  const ray=scene.createPickingRay(sx,sy,Matrix.Identity(),camera);
+  // Target the camera the user is actually looking through (orbit OR free-fly).
+  const ray=scene.createPickingRay(sx,sy,Matrix.Identity(),scene.activeCamera||camera);
   const groundDistance=ray.intersectsPlane(new Plane(0,1,0,0));
-  if(groundDistance===null||groundDistance<0)return null;
-  let p=ray.origin.add(ray.direction.scale(groundDistance));
+  let p=groundDistance!==null&&groundDistance>=0?
+    ray.origin.add(ray.direction.scale(groundDistance)):null;
   // Match the building visible UNDER THE CURSOR, not the ground behind it.
   // Previously clicking a facade targeted a distant ground point.
-  let best=groundDistance,hitFloor=null;
+  let best=p?groundDistance:Infinity,hitFloor=null;
   if(world)for(const e of world.structures){
     if(e.active||!e.mesh.isEnabled())continue;
     const info=ray.intersectsMesh(e.mesh,false);
@@ -182,7 +185,7 @@ function surfacePoint(sx,sy){
     const center=hitFloor.mesh.getAbsolutePosition();
     p=new Vector3(center.x,center.y,center.z);
   }
-  if(!Number.isFinite(p.x)||Math.abs(p.x)>CITY_HALF_SIZE||Math.abs(p.z)>CITY_HALF_SIZE)return null;
+  if(!p||!Number.isFinite(p.x)||Math.abs(p.x)>CITY_HALF_SIZE||Math.abs(p.z)>CITY_HALF_SIZE)return null;
   return p;
 }
 function pointerCoordinates(e){
@@ -223,6 +226,7 @@ function cycleSpeed(){
 }
 function toggleWalkMode(){
   if(!walk||rebuilding)return;
+  if(fly?.enabled)toggleFlyMode(false);
   recordedAudio.play('select');
   walk.setEnabled(!walk.enabled);
   const active=walk.enabled;
@@ -236,6 +240,23 @@ function toggleWalkMode(){
     active?(mobileDevice?'Left stick: move · swipe: look · STRIKE: disaster':
       'WASD: move · mouse: look · F: disaster · V: exit'):'');
   if(active)walk.lockPointer();
+}
+function toggleFlyMode(force=null){
+  if(!fly||rebuilding)return;
+  const enabled=force===null?!fly.enabled:!!force;
+  if(fly.enabled===enabled)return;
+  if(enabled&&walk?.enabled)toggleWalkMode();
+  fly.setEnabled(enabled);
+  document.documentElement.classList.toggle('fly-mode',enabled);
+  $('#flyBtn').classList.toggle('is-active',enabled);
+  $('#flyBtn').setAttribute('aria-pressed',String(enabled));
+  $('#flyBtn span').textContent=enabled?'EXIT FLY':'FLY';
+  $('#targetCursor').style.opacity='0';
+  setMobileMenu(false);
+  recordedAudio.play('select');
+  toast(enabled?'FREE CAMERA ENABLED':'ORBIT CAMERA RESTORED',
+    enabled?(mobileDevice?'Swipe to look · arrows move · ＋/－ altitude':
+      'Drag to look · WASD fly · E/Q up/down · Shift boost · mouse wheel speed'):'');
 }
 function walkTarget(){
   if(!walk?.enabled||!world)return null;
@@ -273,6 +294,7 @@ function respawnPlayer(){
 }
 function cycleCamera(){
   if(walk?.enabled){toggleWalkMode();return}
+  if(fly?.enabled)toggleFlyMode(false);
   cameraIndex=(cameraIndex+1)%cameraAngles.length;
   const [a,b,r]=cameraAngles[cameraIndex];
   camera.alpha=a;camera.beta=b;camera.radius=r;
@@ -333,6 +355,7 @@ async function createGame(){
   $('#loading').classList.remove('is-done');
   $('#loadingText').textContent='INITIALIZING PHYSICS ENGINE...';
   if(physicsViewer){physicsViewer.dispose();physicsViewer=null}
+  if(fly){fly.dispose();fly=null;document.documentElement.classList.remove('fly-mode');$('#flyBtn').classList.remove('is-active')}
   if(walk){walk.dispose();walk=null;document.documentElement.classList.remove('walk-mode','walk-locked');$('#walkBtn').classList.remove('is-active');$('#walkBtn').setAttribute('aria-pressed','false');$('#walkBtn span').textContent='WALK'}
   if(scene){scene.dispose();scene=null;world=null;disasters=null}
   scene=new Scene(engine);
@@ -354,6 +377,7 @@ async function createGame(){
   world=new CityWorld(scene,camera,buildingCount,{mobile:mobileDevice});
   recordedAudio.bindWorld(world);
   walk=new WalkController(scene,canvas,camera,world,mobileDevice);
+  fly=new FlyController(scene,canvas,camera);
   walk.survival.onDeath=cause=>{
     $('#walkDeathCause').textContent='CAUSE: '+cause.toUpperCase();
     $('#walkDeath').classList.add('is-visible');
@@ -385,7 +409,9 @@ async function createGame(){
   $('#events').innerHTML='';
   logEvent('City rebuilt','Physics world reset and ready');
   updateStats(1);
-  setStatus('CHOOSE A TARGET TO BEGIN',mobileDevice?'Tap city to strike · drag to orbit · pinch to zoom':'Use the mouse to aim anywhere in the city');
+  setStatus('CHOOSE A TARGET TO BEGIN',mobileDevice?
+    'Tap city to strike · ✈ FLY to move freely · pinch in ORBIT to zoom':
+    'Click city to strike · G: free camera · WASD to fly · Q/E altitude');
   rebuilding=false;
   setTimeout(()=>$('#loading').classList.add('is-done'),330);
   window.disasterDebug={
@@ -577,6 +603,13 @@ async function createGame(){
         activity:p.routineActivity,goal:p.routineGoal,enabled:p.root.isEnabled(),
         torsoVisible:p.root.getChildMeshes().find(m=>m.name.startsWith('person torso'))?.isVisible}))}),
     getWalk:()=>walk?.info(),
+    getFly:()=>({enabled:!!fly?.enabled,position:fly?.position(),
+      yaw:fly?.yaw,pitch:fly?.pitch,
+      speed:fly?.speed,activeCamera:scene.activeCamera?.name,
+      hasSkyDome:scene.meshes.some(m=>m.name==='atmosphere'),
+      hasSkyBackdrop:!!world.skyBackdrop}),
+    toggleFly:()=>toggleFlyMode(),
+    flyButton:(direction,pressed)=>fly?.button(direction,pressed),
     getPlayerState:()=>walk?.survival.dieState(),
     respawnPlayer:()=>respawnPlayer(),
     // Developer-only disaster damage calibration; not exposed in the game UI.
@@ -664,6 +697,19 @@ function bindUI(){
   $('#pauseBtn').addEventListener('click',togglePause);
   $('#speedBtn').addEventListener('click',cycleSpeed);
   $('#cameraBtn').addEventListener('click',cycleCamera);
+  $('#flyBtn').addEventListener('click',()=>toggleFlyMode());
+  document.querySelectorAll('[data-fly]').forEach(button=>{
+    const action=button.dataset.fly;
+    button.addEventListener('pointerdown',e=>{
+      if(!fly?.enabled)return;
+      e.preventDefault();
+      button.setPointerCapture?.(e.pointerId);
+      fly.button(action,true);
+    });
+    for(const event of ['pointerup','pointercancel','lostpointercapture']){
+      button.addEventListener(event,()=>fly?.button(action,false));
+    }
+  });
   $('#walkBtn').addEventListener('click',toggleWalkMode);
   $('#walkStrikeBtn').addEventListener('click',walkStrike);
   $('#walkHelpBtn').addEventListener('click',walkHelp);
@@ -716,7 +762,9 @@ function bindUI(){
   canvas.addEventListener('contextmenu',e=>e.preventDefault());
   document.addEventListener('keydown',e=>{
     if(e.target instanceof HTMLInputElement)return;
+    if(fly?.key(e.code,true)){e.preventDefault();return}
     if(walk?.key(e.code,true)){e.preventDefault();return}
+    if(e.key.toLowerCase()==='g'){toggleFlyMode();return}
     if(e.key.toLowerCase()==='v'){toggleWalkMode();return}
     if(e.key.toLowerCase()==='f'&&walk?.enabled){walkStrike();return}
     if(e.key.toLowerCase()==='e'&&walk?.enabled){walkHelp();return}
@@ -728,7 +776,7 @@ function bindUI(){
     else if(e.key.toLowerCase()==='p')togglePhysicsViewer();
     else if(e.key==='Escape'){$('#helpModal').classList.add('hidden');setMobileMenu(false)}
   });
-  document.addEventListener('keyup',e=>{if(walk?.key(e.code,false))e.preventDefault()});
+  document.addEventListener('keyup',e=>{if(fly?.key(e.code,false)||walk?.key(e.code,false))e.preventDefault()});
   window.addEventListener('resize',()=>{engine.resize();if(!compactLayout())setMobileMenu(false)});
   window.addEventListener('orientationchange',()=>setTimeout(()=>engine.resize(),240));
   syncFullscreenUI();
@@ -762,6 +810,7 @@ engine.runRenderLoop(()=>{
     }
     updateStats(dt);
   }
+  fly?.update(dt);
   if(paused)recordedAudio.update({world,disasters,walk,paused:true});
   rescueMarkers.update(world,scene);
   scene.render();

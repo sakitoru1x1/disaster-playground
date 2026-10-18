@@ -27,7 +27,8 @@
     "test:citizen-ragdolls:browser": "node tests/citizenRagdollsBrowser.cjs",
     "test:services": "node tests/cityServices.test.mjs",
     "test:services:browser": "node tests/cityServicesBrowser.cjs",
-    "test:fire-pet-audio": "node tests/firePetAudio.test.mjs"
+    "test:fire-pet-audio": "node tests/firePetAudio.test.mjs",
+    "test:fly-camera": "node tests/flyCameraBrowser.cjs"
   },
   "dependencies": {
     "@babylonjs/core": "^9.31.0",
