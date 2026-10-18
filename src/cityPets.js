@@ -2,6 +2,7 @@ import {TransformNode,Vector3} from '@babylonjs/core';
 import {terrainDisplacement} from './terrainDamage.js';
 import {CITY_HALF_SIZE} from './cityLayout.js';
 import {SIDEWALK_COORDS,choosePedestrianNext} from './cityMotion.js';
+import {petHearingGain} from './recordedAudio.js';
 const V=(x,y,z)=>new Vector3(x,y,z);
 const rand=(a,b)=>a+(b-a)*Math.random();
 const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
@@ -89,7 +90,8 @@ export function affectPets(world,kind,center,power,radius,dt){
  }
 }
 export function updatePets(world,dt){
- const listener=world.audio?.getListener?.();
+ const camera=world.scene?.activeCamera;
+ const listener=camera?.globalPosition||camera?.position||null;
  for(const pet of world.pets||[]){
   const p=pet.root.position;
   if(pet.airborne){
@@ -130,7 +132,7 @@ export function updatePets(world,dt){
   pet.tail.rotation.y=Math.sin(world.time*3+pet.stride*.15)*.36;
   if(pet.voice<=0){
    pet.voice=rand(9,24);
-   if(listener&&Math.hypot(p.x-listener.x,p.z-listener.z)<46)
+   if(petHearingGain(p,listener)>0)
     world.audio?.play(pet.kind==='cat'?'catMeow':'dogBark',p,.45);
   }
  }

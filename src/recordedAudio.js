@@ -60,12 +60,27 @@ const LOOP={
  storm:.32,siren:.14,drum:.32,pour:.30,fire:.24,responder:.27
 };
 const COOLDOWN={rubble:.22};
+// Pets are intimate, local sounds, not city-wide ambience. This hard
+// near-field gate uses the CAMERA position (not orbit target) in full 3D.
+export const PET_AUDIO_RANGE=18;
+export function petHearingGain(source,camera,range=PET_AUDIO_RANGE){
+ if(!source||!camera)return 0;
+ const dist=Math.hypot(source.x-camera.x,(source.y??0)-(camera.y??0),
+   source.z-camera.z);
+ if(!Number.isFinite(dist)||dist>=range)return 0;
+ const fade=Math.max(0,1-dist/range);
+ return fade*fade;
+}
+export const isPetCue=name=>name==='catMeow'||name==='catPanic'||
+ name==='dogBark'||name==='dogPanic';
+
 export class RecordedSoundscape{
  constructor({mobile=false,Context=globalThis.AudioContext||globalThis.webkitAudioContext}={}){
   this.mobile=mobile;this.Context=Context;
   this.enabled=true;this.ctx=null;this.master=null;this.musicBus=null;this.effectsBus=null;
   this.world=null;this.buffers=new Map();this.loads=new Map();
   this.loops=new Map();this.last=new Map();this.playing=new Set();
+  this.petVoices=new Set();
   this.listener=null;this.nextUpdate=0;this.lastStep=0;this.previousRecovery='';
   this.nextHorn=0;this.musicLevel=.65;this.effectsLevel=.88;
   this.stats={started:0,dropped:0,decoded:0,errors:0};
@@ -123,6 +138,10 @@ export class RecordedSoundscape{
   })();
   this.loads.set(file,pending);return pending;
  }
+ getCameraPosition(){
+  const camera=this.world?.scene?.activeCamera;
+  return camera?.globalPosition||camera?.position||null;
+ }
  getListener(){
   const c=this.world?.scene?.activeCamera;
   if(!c)return null;
@@ -152,11 +171,17 @@ export class RecordedSoundscape{
  play(name,position=null,strength=1){
   const entry=EFFECTS[name];if(!entry||!this.ctx||!this.enabled||this.ctx.state!=='running')return false;
   const now=this.ctx.currentTime;
+  const petCue=isPetCue(name);
+  const camera=petCue?this.getCameraPosition():null;
+  const nearby=petCue?petHearingGain(position,camera):1;
+  // Drop a distant bark or meow BEFORE creating an audio buffer or filling
+  // the shared cooldown; otherwise a distant animal masks the nearby one.
+  if(petCue&&nearby<=0){this.stats.dropped++;return false}
   const cd=entry.cooldown??.08;
   const group=entry.group||name;
   if(now<(this.last.get(group)||0)){this.stats.dropped++;return false}
   if(this.playing.size>(this.mobile?7:12)){this.stats.dropped++;return false}
-  const space=this.spatial(position,entry.priority>=2?130:70);
+  const space=petCue?{gain:nearby}:this.spatial(position,entry.priority>=2?130:70);
   if(space.gain<.025){this.stats.dropped++;return false}
   this.last.set(group,now+(COOLDOWN[group]??cd));
   const key=Array.isArray(entry.key)
@@ -164,12 +189,26 @@ export class RecordedSoundscape{
   this.load(key).then(buffer=>{
    if(!buffer||!this.ctx||!this.enabled||this.ctx.state!=='running')return;
    if(this.playing.size>(this.mobile?7:12))return;
+   const currentPetGain=petCue?petHearingGain(position,this.getCameraPosition()):1;
+   // Decoding can finish after the listener has walked away. Never play a
+   // stale yelp at full volume once the pet is no longer close to the camera.
+   if(petCue&&currentPetGain<=0)return;
    const src=this.ctx.createBufferSource();src.buffer=buffer;
    src.playbackRate.value=.94+Math.random()*.12;
-   const volume=Math.min(.95,(entry.volume||.3)*strength*space.gain);
+   const volume=Math.min(.95,(entry.volume||.3)*strength*
+     (petCue?currentPetGain:space.gain));
    const route=this.route(src,this.effectsBus,position,volume);
+   if(petCue&&route.pan){
+    const direction=this.world?.scene?.activeCamera?.getForwardRay?.()?.direction;
+    const listener=this.getCameraPosition();
+    const dx=position.x-listener.x,dz=position.z-listener.z;
+    route.pan.pan.value=CLAMP((direction?dx*direction.z-dz*direction.x:dx)/18,-.9,.9);
+   }
    this.playing.add(src);this.stats.started++;
-   src.onended=()=>{this.playing.delete(src);route.stop()};
+   const voice=petCue?{position,volume:route.volume,base:
+     Math.min(.95,(entry.volume||.3)*strength)}:null;
+   if(voice)this.petVoices.add(voice);
+   src.onended=()=>{this.playing.delete(src);if(voice)this.petVoices.delete(voice);route.stop()};
    src.start();
   });
   return true;
@@ -222,6 +261,12 @@ export class RecordedSoundscape{
   const now=this.ctx.currentTime;if(now<this.nextUpdate)return;
   this.nextUpdate=now+.14;
   this.world=world;
+  // If the camera leaves during a long meow/bark, quickly fade that voice
+  // rather than letting the entire clip continue across the map.
+  for(const voice of this.petVoices){
+   const gain=petHearingGain(voice.position,this.getCameraPosition());
+   voice.volume.gain.setTargetAtTime(voice.base*gain,now,.045);
+  }
   const recovery=world.progression?.recovery;
   const stage=recovery?.stage||'idle',phase=recovery?.phase||'idle';
   const danger=!!(disasters?.effects?.length||disasters?.meteors?.length||disasters?.blastWaves?.length);
@@ -315,7 +360,7 @@ export class RecordedSoundscape{
   loops:this.loops.size,voices:this.playing.size,bufferCount:this.buffers.size,...this.stats}}
  dispose(){
   for(const slot of this.loops.values()){try{slot.source?.stop();slot.node?.stop()}catch{}}
-  this.loops.clear();this.playing.clear();this.loads.clear();this.buffers.clear();
+  this.loops.clear();this.playing.clear();this.petVoices.clear();this.loads.clear();this.buffers.clear();
   const ctx=this.ctx;this.ctx=null;ctx?.close().catch(()=>{});
  }
 }

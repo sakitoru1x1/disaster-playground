@@ -1,7 +1,26 @@
 import {MeshBuilder,Vector3,StandardMaterial,Color3,PointLight} from '@babylonjs/core';
+import {terrainDisplacement} from './terrainDamage.js';
 const V=(x,y,z)=>new Vector3(x,y,z);
 const distance=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
 const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+// An actual building fire needs a physical support surface. Don't leave
+// burning window decals hovering where a damaged storey used to be.
+// Only floors supported from the foundation upward count as standing.
+export function supportedFireAnchor(building,terrainHeight=0){
+ if(!building?.floors?.length)return V(building?.x||0,terrainHeight+.85,building?.z||0);
+ const standing=[];
+ for(const floor of building.floors){
+  if(floor.active||!floor.mesh||floor.mesh.isDisposed?.()||
+     floor.mesh.isEnabled?.()===false)break;
+  standing.push(floor);
+ }
+ if(!standing.length)return V(building.x,terrainHeight+.85,building.z);
+ const floor=standing[Math.floor((standing.length-1)*.67)];
+ const p=floor.mesh.getAbsolutePosition?.()||floor.mesh.position;
+ const offset=Math.max(1.1,Math.min(floor.size?.x||5,floor.size?.z||5)*.43);
+ // Keep the flame on the side of this *remaining* facade, not beyond it.
+ return V(p.x+offset,p.y,p.z);
+}
 export class CityFires{
  constructor(world){
   this.world=world;this.fires=new Map();this.clock=0;this.spreadClock=0;
@@ -21,11 +40,34 @@ export class CityFires{
   this.smokeMat.disableLighting=true;this.smokeMat.alpha=.44;
  }
  chooseAnchor(building){
-  const intact=building.floors.filter(f=>!f.active);
-  const floor=intact[Math.min(intact.length-1,Math.max(0,Math.floor(intact.length*.66)))];
-  const y=floor?floor.mesh.position.y:2.4;
-  const x=building.x+Math.max(3,building.floors[0]?.size?.x*.5||4);
-  return V(x,y,building.z);
+  const ground=terrainDisplacement(building.x,building.z,
+    this.world.terrainCraters||[]);
+  return supportedFireAnchor(building,ground);
+ }
+ positionEffects(f){
+  // Re-evaluate support each frame: falling/detached walls cannot continue
+  // to display floating fire and the smoke must follow the new burn site.
+  f.anchor.copyFrom(this.chooseAnchor(f.building));
+  const anchor=f.anchor,heat=f.heat;
+  for(let i=0;i<f.flames.length;i++){
+   const mesh=f.flames[i];
+   mesh.position.set(anchor.x+(i-1)*.9,
+     anchor.y+i*.55+Math.sin(f.age*4+i)*.3,
+     anchor.z+(i%2-.5)*1.6);
+   mesh.scaling.y=(.85+Math.sin(f.age*7+i*1.9)*.30)*heat;
+   mesh.scaling.x=(.70+Math.sin(f.age*3.7+i)*.14)*heat;
+   mesh.setEnabled(heat>.03);
+  }
+  for(let i=0;i<f.smoke.length;i++){
+   const mesh=f.smoke[i];
+   mesh.position.set(anchor.x+i*.24+Math.sin(f.age*.8+i)*.56,
+     anchor.y+2+i*1.65+(f.age*.75%2),anchor.z-.5);
+   mesh.scaling.setAll((1+i*.22)*(.8+heat*.58));
+  }
+  if(f.light){
+   f.light.position.copyFrom(anchor).addInPlaceFromFloats(0,2,0);
+   f.light.intensity=(2.2+Math.sin(f.age*15)*.9)*heat;
+  }
  }
  ignite(building,strength=.55){
   if(!building||this.fires.size>=this.maxFires)return false;
@@ -90,19 +132,7 @@ export class CityFires{
    f.age+=dt;f.lastDamage+=dt;
    if(f.extinguishing>0)f.extinguishing=Math.max(0,f.extinguishing-dt*.25);
    else f.heat=clamp(f.heat+dt*.0015);
-   const height=f.anchor.y;
-   for(let i=0;i<f.flames.length;i++){
-    const m=f.flames[i];m.scaling.y=(.85+Math.sin(f.age*7+i*1.9)*.30)*f.heat;
-    m.scaling.x=(.70+Math.sin(f.age*3.7+i)*.14)*f.heat;
-    m.position.y=height+i*.55+Math.sin(f.age*4+i)*.3;
-    m.setEnabled(f.heat>.03);
-   }
-   for(let i=0;i<f.smoke.length;i++){
-    const m=f.smoke[i];m.position.y=height+2+i*1.65+(f.age*.75%2);
-    m.position.x=f.anchor.x+i*.32+Math.sin(f.age*.8+i)*.56;
-    m.scaling.setAll((1+i*.22)*(.8+f.heat*.58));
-   }
-   if(f.light)f.light.intensity=(2.2+Math.sin(f.age*15)*.9)*f.heat;
+   this.positionEffects(f);
    if(f.lastDamage>5.5&&f.heat>.35){
     f.lastDamage=0;
     // Flames attack a local intact floor, not all 200 structures.
