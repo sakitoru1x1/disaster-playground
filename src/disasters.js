@@ -42,7 +42,9 @@ export class DisasterSystem{
       case 'quake':this.quake(p,strength);break;
       case 'tsunami':this.tsunami(p,strength);break;
     }
-    this.world.affectLife?.(type,p,strength,15+85*strength,.07);
+    // Civilians react when the actual meteor blast, moving tornado funnel or
+    // sweeping tsunami FRONT reaches them, not at click time anywhere in a
+    // 100m radius. The quake and impact ticks handle their own exposure.
     this.events.onDeploy?.(type,p,strength);
     return p;
   }

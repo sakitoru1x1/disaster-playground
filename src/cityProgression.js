@@ -1,3 +1,4 @@
+import {civilianPosition,settleCitizenRagdoll} from './citizenRagdolls.js';
 import {MeshBuilder,TransformNode,PhysicsAggregate,PhysicsShapeType,PhysicsMotionType,Quaternion,Vector3} from '@babylonjs/core';
 import {trafficRoutes,positionOnRoute,trafficHeading} from './cityMotion.js';
 import {planCity} from './cityLayout.js';
@@ -92,13 +93,14 @@ export class CityProgression {
    let nearest=null,best=1e9;
    for(const p of world.civilians){
     if(p.state!=='injured')continue;
-    const r=distance(medic.root.position,p.root.position);
+    const r=distance(medic.root.position,civilianPosition(p));
     if(r<best){best=r;nearest=p}
    }
    medic.medicalTarget=nearest;
-   if(nearest&&best<1.7){
+   if(nearest&&best<1.7&&civilianPosition(nearest).y<3){
     nearest.treatment=(nearest.treatment||0)+dt;
     if(nearest.treatment>1.8){
+     if(nearest.ragdoll||nearest.airborne)settleCitizenRagdoll(nearest,world,true);
      nearest.state='walking';nearest.exposure=0;
      nearest.root.position.y=.215;nearest.root.rotation.z=0;
      nearest.help?.setEnabled(false);
@@ -143,10 +145,12 @@ export class CityProgression {
   let found=null,distance=3.3;
   for(const p of this.world.civilians){
    if(p.state!=='injured')continue;
-   const r=Math.hypot(p.root.position.x-pos.x,p.root.position.z-pos.z);
+   const at=civilianPosition(p);
+   const r=Math.hypot(at.x-pos.x,at.z-pos.z,(at.y-pos.y)*.6);
    if(r<distance){found=p;distance=r}
   }
   if(!found)return false;
+  if(found.ragdoll||found.airborne)settleCitizenRagdoll(found,this.world,true);
   found.state='walking';found.root.rotation.z=0;found.root.position.y=.215;
   found.help?.setEnabled(false);
   found.exposure=0;found.treatment=0;this.rescued++;

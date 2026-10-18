@@ -1,0 +1,29 @@
+/* Screen-space distress indicators replace black WebGL billboard panels. */
+.rescue-sign-layer{position:fixed;inset:0;pointer-events:none;z-index:4;overflow:hidden}
+.rescue-tag{
+  position:absolute;transform:translate(-50%,-110%);
+  font:900 13px/1.1 'Segoe UI',Arial,sans-serif;letter-spacing:.07em;
+  color:#fffdf1!important;background:#c95132!important;
+  padding:6px 10px 6px 7px;border:2px solid #ffe5a3;
+  border-radius:9px;box-shadow:0 2px 16px #0b101b9c,0 0 0 2px #46271970;
+  white-space:nowrap;text-shadow:0 1px 1px #402014;
+  filter:drop-shadow(0 2px 4px #20202d);
+  will-change:transform,left,top;
+}
+.rescue-tag b{
+ display:inline-grid;place-items:center;color:#b93f2d;background:#fff4d4;
+ padding:2px 5px;border-radius:4px;margin-right:3px;font-size:15px;
+ text-shadow:none
+}
+.rescue-tag span{color:#fff5a4}
+.rescue-tag:after{
+ content:'';position:absolute;left:calc(50% - 6px);bottom:-9px;
+ border-left:6px solid transparent;border-right:6px solid transparent;
+ border-top:8px solid #ffe5a3
+}
+.rescue-tag-near{animation:rescue-flash 1.4s ease-in-out infinite}
+@keyframes rescue-flash{50%{box-shadow:0 1px 23px #ffe49caa}}
+@media(max-width:640px){
+ .rescue-tag{font-size:11px;padding:4px 7px;border-radius:7px}
+ .rescue-tag b{font-size:12px;padding:1px 4px}
+}

@@ -1,8 +1,10 @@
 import {
-  MeshBuilder,Vector3,Quaternion,TransformNode,DynamicTexture,Texture,Mesh,PhysicsAggregate,
+  MeshBuilder,Vector3,Quaternion,TransformNode,PhysicsAggregate,
   PhysicsShapeType,PhysicsMotionType
 } from '@babylonjs/core';
 import {terrainDisplacement} from './terrainDamage.js';
+import {civilianPosition,pushCitizenRagdoll,animateCitizenRagdoll,
+  settleCitizenRagdoll} from './citizenRagdolls.js';
 import {citizenIdentity,updateCitizenRoutine,nextTowardNode} from './citizenRoutines.js';
 import {
   pedestrianNode,choosePedestrianNext,
@@ -25,17 +27,9 @@ export function populateCityLife(world){
   m.pedPants=world.mat('citizen trousers','#323c4d');
   m.wreck=world.mat('vehicle impact soot','#34363a');
   m.stain=world.mat('small ground injury stain','#77332d',{alpha:.58,disableLighting:true});
-  const helpTexture=new DynamicTexture('city SOS sign',{width:128,height:64},world.scene,false);
-  helpTexture.hasAlpha=true;
-  const ctx=helpTexture.getContext();ctx.clearRect(0,0,128,64);
-  ctx.fillStyle='#ba463ee7';ctx.fillRect(0,0,128,64);
-  ctx.font='bold 33px sans-serif';ctx.textAlign='center';
-  ctx.fillStyle='#fff3e5';ctx.fillText('HELP!',64,44);helpTexture.update();
-  m.helpSign=world.mat('injured civilian aid signal','#ffffff',
-    {disableLighting:true,backFaceCulling:false});
-  m.helpSign.diffuseTexture=helpTexture;
-  m.helpSign.useAlphaFromDiffuseTexture=true;
-
+  // Rescue labels are projected into a readable HTML overlay by
+  // RescueMarkers. The previous dynamic-texture planes turned into black
+  // rectangles on some Android / WebGL renderers.
   // A connected grid of safe footpaths around the 26m city blocks.
   // Pedestrians cross at intersections and turn instead of standing in place.
   // Citizen geometry is instanced: 165 people are only a handful of distinct
@@ -77,10 +71,8 @@ function spawnCitizen(world,i,masters){
     const arm=masters.arms[shirt].createInstance('person arm '+i);
     arm.parent=root;arm.position=V(side*.42,1.18,0);arms.push(arm);
   }
-  const help=MeshBuilder.CreatePlane('injured HELP signal',
-    {width:1.55,height:.72},world.scene);
-  help.parent=root;help.position.y=2.95;help.billboardMode=Mesh.BILLBOARDMODE_ALL;
-  help.material=m.helpSign;help.isPickable=false;help.setEnabled(false);
+  const help=new TransformNode('help signal logical anchor',world.scene);
+  help.parent=root;help.position.y=2.7;help.setEnabled(false);
   root.getChildMeshes().forEach(mesh=>mesh.isPickable=false);
   world.civilians.push({root,x:here.x,z:here.z,state:'walking',panic:0,exposure:0,
     threat:V(here.x+3,0,here.z+3),walkPhase:rand(0,7),speed:identity.speed,
@@ -99,6 +91,7 @@ export function attractNewResidents(world,count=3){
     const deadIndex=world.civilians.findIndex(p=>p.identity&&p.state==='dead');
     if(deadIndex!==-1){
       const dead=world.civilians.splice(deadIndex,1)[0];
+      if(dead.ragdoll||dead.airborne)settleCitizenRagdoll(dead,world);
       dead.root.dispose(false,false);
     }
     spawnCitizen(world,world.nextCitizenId++,world.citizenMasterRefs);
@@ -113,7 +106,12 @@ function injureCivilian(world,p){
   world.audio?.play('hurt',p.root.position,.5);
   p.state='injured';p.panic=0;p.medicalTarget=null;p.exposure=0;
   p.help?.setEnabled(true);
-  p.root.rotation.z=-.44;
+  p.help?.setEnabled(true);
+  // A collapsed injured citizen should be lying down, not standing tilted.
+  p.root.rotation.z=-1.17;
+  p.root.rotation.y=rand(-.42,.42);
+  p.legs?.forEach((leg,i)=>leg.rotation.x=i?.24:-.35);
+  p.arms?.forEach((arm,i)=>arm.rotation.x=i?-.65:.55);
   p.root.position.y=.15;
 }
 function killCivilian(world,p){
@@ -179,12 +177,22 @@ function damageCar(world,car,power,direction){
 export function affectCityLife(world,kind,center,power,radius,dt){
   const strength=clamp(power,0,1);
   for(const p of world.civilians){
-    if(p.state==='dead'||p.state==='injured')continue;
-    const x=p.root.position.x,z=p.root.position.z;
+    if(p.state==='dead')continue;
+    const at=civilianPosition(p);
+    const x=at.x,z=at.z;
     const distance=kind==='quake'?0:kind==='tsunami'?Math.abs(x-center.x):
       Math.hypot(x-center.x,z-center.z);
     if(distance>radius)continue;
     const falloff=kind==='quake'?1:clamp(1-distance/Math.max(1,radius),0,1);
+    const physical=kind==='tornado'||kind==='tsunami';
+    const impact=physical&&strength>.28&&
+      (kind==='tornado'?strength*falloff>.19:falloff>.40);
+    if(impact){
+      if(p.state!=='injured')injureCivilian(world,p);
+      pushCitizenRagdoll(world,p,kind,center,strength,radius,dt);
+    }
+    // Already injured or flying civilians must not be reset to walking.
+    if(p.state==='injured'||p.ragdoll||p.airborne)continue;
     p.threat=V(center.x,0,center.z);
     p.panic=Math.max(p.panic,Math.min(8,2+6*strength));
     p.state='fleeing';
@@ -398,11 +406,13 @@ export function updateCityLife(world,dt){
     // Frustum culling is assisted only in walk mode. Do not cull everyone
     // when the orbit camera views the entire city from high altitude.
     if(!p.root||!p.identity)continue;
+    if(p.ragdoll){p.root.setEnabled(false);continue}
     const far=walkView&&Math.hypot(p.root.position.x-cam.position.x,
       p.root.position.z-cam.position.z)>(world.mobile?68:110);
     if(p.visible===!!far){p.visible=!far;p.root.setEnabled(!far)}
   }
   for(const person of world.civilians){
+    if(animateCitizenRagdoll(person,world,dt))continue;
     walkPedestrian(person,dt,world.time);
     const displacement=terrainDisplacement(person.root.position.x,person.root.position.z,
       world.terrainCraters||[]);

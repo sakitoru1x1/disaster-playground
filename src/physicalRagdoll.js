@@ -3,7 +3,7 @@ const V=(x,y,z)=>new Vector3(x,y,z);
 // A bounded seven-part articulated Havok body, spawned for hard knocks/death.
 // Normal walking remains the inexpensive single-capsule controller.
 export class PhysicalRagdoll {
- constructor(scene,at,velocity){
+ constructor(scene,at,velocity,style=null){
   this.scene=scene;this.parts=[];this.joints=[];this.age=0;
   const pieces=[
    ['torso',[.68,.85,.36],[0,.12,0],12],
@@ -18,8 +18,9 @@ export class PhysicalRagdoll {
    const mesh=MeshBuilder.CreateBox('ragdoll '+name,
     {width:size[0],height:size[1],depth:size[2]},scene);
    mesh.position=at.add(V(...offset));
-   const mat=scene.getMaterialByName(i===1?'citizen skin':
-    i<=3?'citizen jacket 0':'citizen trousers');
+   const mat=style?.[i===0?'torso':i===1?'head':i<4?'arms':'legs']||
+     scene.getMaterialByName(i===1?'citizen skin':
+       i<=3?'citizen jacket 0':'citizen trousers');
    if(mat)mesh.material=mat;
    mesh.isPickable=false;
    const aggregate=new PhysicsAggregate(mesh,PhysicsShapeType.BOX,

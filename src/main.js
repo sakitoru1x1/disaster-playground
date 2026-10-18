@@ -5,6 +5,7 @@ import {
 import HavokPhysics from '@babylonjs/havok';
 import {CityWorld} from './world.js';
 import {DisasterSystem} from './disasters.js';
+import {RescueMarkers} from './rescueMarkers.js';
 import {RecordedSoundscape} from './recordedAudio.js';
 import {WalkController} from './walkController.js';
 import {pauseCityTraffic,cityClock,citizenStats} from './cityLife.js';
@@ -17,6 +18,7 @@ import './mobile.css';
 import './walk.css';
 import './playerSurvival.css';
 import './survivorHelp.css';
+import './rescueMarkers.css';
 
 const $=selector=>document.querySelector(selector);
 const $$=selector=>[...document.querySelectorAll(selector)];
@@ -38,6 +40,7 @@ $('#housesCount').value=String(buildingCount);
 let simTime=0,lastTick=performance.now(),fpsTimer=0;
 let rebuilding=false,soundsOn=true,qualityHigh=false,cinematic=false;
 let physicsViewer=null;
+const rescueMarkers=new RescueMarkers(canvas);
 const recordedAudio=new RecordedSoundscape({mobile:mobileDevice});
 let pointerStart=null,targetPoint=null,hovered=false;
 let cameraAngles=[[-Math.PI*.67,1.05,320],[-Math.PI*.52,.66,240],[-Math.PI*.15,1.24,150]];
@@ -333,6 +336,7 @@ function surprise(){
 async function createGame(){
   recordedAudio.resetScene();
   rebuilding=true;
+  rescueMarkers.hide();
   $('#loading').classList.remove('is-done');
   $('#loadingText').textContent='INITIALIZING PHYSICS ENGINE...';
   if(physicsViewer){physicsViewer.dispose();physicsViewer=null}
@@ -530,6 +534,23 @@ async function createGame(){
       people:world.civilians.slice(0,15).map(p=>({x:p.root.position.x,y:p.root.position.y,z:p.root.position.z}))
     }),
     getRecovery:()=>world.progression.recovery.currentState(),
+    citizenPhysics:()=>({
+      ragdolls:world.civilians.filter(p=>p.ragdoll).length,
+      airborne:world.civilians.filter(p=>p.airborne).length,
+      injured:world.civilians.filter(p=>p.state==='injured').length,
+      floatingBlackHelpPlanes:scene.meshes.filter(m=>m.name==='injured HELP signal').length,
+      visibleHelpLabels:[...document.querySelectorAll('.rescue-tag')]
+        .filter(e=>e.style.display!=='none').length,
+      victims:world.civilians.filter(p=>p.state==='injured').slice(0,15).map(p=>{
+        const q=p.ragdoll?.torso.position||p.root.position;
+        return {x:q.x,y:q.y,z:q.z,physics:!!p.ragdoll,airborne:!!p.airborne}
+      })
+    }),
+    exposeCitizenTest:(index,kind='tornado',strength=.95)=>{
+      const p=world.civilians[index];if(!p)return false;
+      world.affectLife(kind,p.root.position.clone(),strength,38,.65);
+      return {state:p.state,ragdoll:!!p.ragdoll,airborne:!!p.airborne}
+    },
     // QA harness only: skip real-time waiting to verify all three recovery
     // phases deterministically, without introducing cheat controls in UI.
     tickRecoveryForTest:(seconds=1)=>{
@@ -737,6 +758,7 @@ engine.runRenderLoop(()=>{
     updateStats(dt);
   }
   if(paused)recordedAudio.update({world,disasters,walk,paused:true});
+  rescueMarkers.update(world,scene);
   scene.render();
 });
 (async()=>{
