@@ -5,7 +5,9 @@ import {civilianPosition,settleCitizenRagdoll} from './citizenRagdolls.js';
 const V=(x,y,z)=>new Vector3(x,y,z),distance=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
 const clamp=(n,a=0,b=1)=>Math.max(a,Math.min(b,n));
 const nearestRoad=n=>ROAD_COORDS.reduce((a,b)=>Math.abs(b-n)<Math.abs(a-n)?b:a,ROAD_COORDS[0]);
-const DEPOT={x:-CITY_HALF_SIZE-7,z:-119};
+// Rescue vehicles must never spawn on the ocean outside the city.
+export const EMERGENCY_DEPOT=Object.freeze({x:ROAD_COORDS[0],z:ROAD_COORDS[0]});
+const DEPOT=EMERGENCY_DEPOT;
 export const RESCUE_PHASES=['idle','driving','deploy','approach','treat','load','evacuate','hospital','working','return'];
 export function rescueNeedsStretcher(person){
  return !!person&&(person.ragdoll||person.airborne||person.injurySeverity>=.6||
@@ -14,12 +16,17 @@ export function rescueNeedsStretcher(person){
 export function permitRecoveryWork({burning=false,victim=false,medics=false,heavyEquipment=false}={}){
  return !burning&&!victim&&!medics&&!heavyEquipment;
 }
-function route(depot,target){
+// Emergency vehicles stick to the road lattice all the way to a roadside
+// pickup/parking point. Medics walk the remaining meters to the casualty.
+// Never drive the truck into a house, crater or across the ocean.
+export function emergencyRoadRoute(depot,target){
  const sx=nearestRoad(depot.x),sz=nearestRoad(depot.z);
  const x=nearestRoad(target.x),z=nearestRoad(target.z);
- return [{x:depot.x,z:depot.z},{x:sx,z:sz},{x,z:sz},{x,z},
-  {x:target.x+8,z:target.z-8}];
+ const stops=[{x:sx,z:sz},{x,z:sz},{x,z}];
+ return stops.filter((point,i)=>i===0||
+   point.x!==stops[i-1].x||point.z!==stops[i-1].z);
 }
+const route=emergencyRoadRoute;
 function drive(root,path,dt,speed){
  if(!path.length)return true;
  const p=root.position,target=path[0],dx=target.x-p.x,dz=target.z-p.z;
@@ -193,10 +200,17 @@ export class EmergencyDispatch{
  }
  depotFor(unit){
   const i=this.units[unit.kind].indexOf(unit);
-  return {x:DEPOT.x,z:DEPOT.z+(unit.kind==='fire'?i*9:i*9+28)};
+  // Spread response vehicles along a legal avenue without stacking them.
+  return {x:DEPOT.x,z:ROAD_COORDS[Math.min(4,(unit.kind==='fire'?0:3)+i)]};
  }
  activeUnits(kind){return this.units[kind].filter(u=>u.state!=='idle')}
- phase(unit,next){unit.state=next;unit.elapsed=0;unit.path=[]}
+ phase(unit,next){
+  unit.state=next;unit.elapsed=0;
+  // Transitioning INTO a drive phase must not erase the route just set by
+  // dispatch. The old reset made every truck "arrive" at its depot in one
+  // frame, and medics then walked across the ocean to the injured!
+  if(!['driving','return','evacuate'].includes(next))unit.path=[];
+ }
  targetPoint(unit){
   if(unit.kind==='fire')return unit.target.anchor||unit.target;
   return civilianPosition(unit.patient);

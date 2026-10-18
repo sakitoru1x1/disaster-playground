@@ -30,7 +30,9 @@
     "test:fire-pet-audio": "node tests/firePetAudio.test.mjs",
     "test:fly-camera": "node tests/flyCameraBrowser.cjs",
     "test:dispatch:e2e": "node tests/dispatchIntegration.cjs",
-    "test:coordination": "node tests/dispatchCoordination.test.mjs"
+    "test:coordination": "node tests/dispatchCoordination.test.mjs",
+    "test:emergency-routes": "node tests/emergencyRoutes.test.mjs",
+    "test:emergency-routes:browser": "node tests/emergencyRoutesBrowser.cjs"
   },
   "dependencies": {
     "@babylonjs/core": "^9.31.0",

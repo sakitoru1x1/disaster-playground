@@ -562,14 +562,16 @@ async function createGame(){
       dispatch:world.progression.dispatch?.stats(),
       responders:world.responderVehicles?.filter(e=>e.unit?.state!=='idle').map(e=>({
         name:e.kind,x:e.mesh.position.x,z:e.mesh.position.z,state:e.unit.state,
+        roadPath:e.unit.path.length,siteX:e.unit.target?.x??null,
+        siteZ:e.unit.target?.z??null,
         crewVisible:e.unit.crew.filter(c=>c.root.isEnabled()).length,
         hoseVisible:!!e.unit.spray?.droplets?.some(m=>m.isEnabled()),
         stretcherVisible:!!e.unit.stretcher?.root.isEnabled(),
         visiblePatient:!!e.unit.stretcher?.occupant.isEnabled()}))||[]}),
-    debugRescueCase:(kind='stretcher')=>{
+    debugRescueCase:(kind='stretcher',x=-132,z=-112)=>{
       const p=world.civilians.find(p=>p.identity&&p.state==='walking');
       if(!p)return null;
-      p.root.position.set(-132,.17,-112);
+      p.root.position.set(x,.17,z);
       p.state='injured';p.exposure=kind==='stretcher'?7:0;
       p.injurySeverity=kind==='stretcher'?1:.2;
       p.help?.setEnabled(true);
@@ -603,6 +605,11 @@ async function createGame(){
       world.progression.recovery.tick(Math.min(4,Math.max(.02,seconds)));
       return {recovery:world.progression.recovery.currentState(),
         craters:world.terrainCraters.length,broken:world.brokenFloors};
+    },
+    scatterRubbleForTest:(x=80,z=80,count=12)=>{
+      const before=world.debris.length;
+      world.tossDebris(new Vector3(x,2,z),count,.68);
+      return {added:world.debris.length-before,x,z};
     },
     makeCraterForTest:(x=0,z=0,power=.65)=>{
       world.progression.event('meteor');

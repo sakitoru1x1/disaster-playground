@@ -1,4 +1,4 @@
-import {RecoveryConvoy,recoverySite} from './cityRecovery.js';
+import {RecoveryConvoy} from './cityRecovery.js';
 import {civilianPosition} from './citizenRagdolls.js';
 import {WorksiteVisuals} from './worksiteVisuals.js';
 import {siteMustPause} from './worksiteVisuals.js';
@@ -6,7 +6,8 @@ import {siteMustPause} from './worksiteVisuals.js';
 // Independent local lots. Work at lot A can be in concrete while the
 // helicopter is still carrying real wreckage away from lot B.
 const near=(a,b,r=15)=>Math.hypot(a.x-b.x,a.z-b.z)<r;
-const damaged=b=>b.floors.some(f=>f.active||f.health<f.maxHealth);
+// Partial numeric damage to an intact wall is not a missing storey.
+export const needsHeavyRebuild=b=>!!b?.floors?.some(f=>f.active);
 export function recoverySiteStatus(site){
  if(site.fire||site.victims)return 'blocked';
  if(!site.cleared)return 'cleanup';
@@ -51,7 +52,7 @@ export class ParallelRecovery{
    const craters=(w.terrainCraters||[]).filter(c=>near(c,b,16));
    craters.forEach(c=>usedCrater.add(c));
    const broken=b.floors.some(e=>e.active);
-   const affected=damaged(b);
+   const affected=needsHeavyRebuild(b);
    if(!broken&&!affected&&!craters.length&&!existing)continue;
    const site=existing||{key,x:b.x,z:b.z,building:b,cleared:!broken,
      complete:false,priority:1,claimed:{},touched:false};
@@ -78,18 +79,38 @@ export class ParallelRecovery{
    site.fire=this.isBurning(site);site.victims=this.hasNearbyVictim(site);
    this.sites.set(key,site);
   }
-  // Road/pedestrian rubble outside a building footprint also requires a
-  // helicopter, but nearby chunks are processed in ONE lift.
-  const tracked=new Set(this.sites.keys());
-  for(let i=0;i<Math.max(0,8-tracked.size);i++){
-   const extra=recoverySite(w,tracked);
-   if(!extra)break;
-   tracked.add(extra.key);
-   if(this.sites.has(extra.key))continue;
-   if([...this.sites.values()].some(s=>near(s,extra,15)))continue;
-   this.sites.set(extra.key,{...extra,cleared:false,craters:0,
-     damaged:false,fire:false,victims:this.hasNearbyVictim(extra),
-     claimed:{},touched:false});
+  // Scan geographically distinct debris clusters, not the first two items
+  // from the fragment array over and over. Previously the changing
+  // (8-tracked.size) loop stopped early and often never discovered rubble
+  // in the other districts — consequently no helicopters were dispatched.
+  // A grid bucket has one site but can contain dozens of actual loose meshes.
+  const buckets=new Map();
+  for(const group of ['fragments','debris','visualFragments','rubble','staticRubbleBatches']){
+   for(const item of w[group]||[]){
+    const mesh=item.mesh||item;
+    if(!mesh||mesh.isDisposed?.())continue;
+    const position=mesh.metadata?.bakedRubble?
+      mesh.getBoundingInfo().boundingBox.centerWorld:
+      (mesh.getAbsolutePosition?.()||mesh.position);
+    if(!position||!Number.isFinite(position.x)||!Number.isFinite(position.z))continue;
+    const key='g'+Math.round(position.x/18)+','+Math.round(position.z/18);
+    const bucket=buckets.get(key)||{key,x:0,z:0,amount:0};
+    bucket.x+=position.x;bucket.z+=position.z;bucket.amount++;
+    buckets.set(key,bucket);
+   }
+  }
+  const extraSites=[...buckets.values()].sort((a,b)=>b.amount-a.amount);
+  const targetSlots=w.mobile?8:14;
+  for(const item of extraSites){
+   if(this.sites.size>=targetSlots)break;
+   if(this.sites.has(item.key))continue;
+   const site={key:item.key,x:item.x/item.amount,z:item.z/item.amount,
+     building:null,radius:16,claimed:{},cleared:false,craters:0,
+     damaged:false,touched:false,complete:false};
+   if([...this.sites.values()].some(existing=>near(existing,site,16)))continue;
+   site.fire=this.isBurning(site);
+   site.victims=this.hasNearbyVictim(site);
+   this.sites.set(site.key,site);
   }
   // Remove stale crater-only lots after the mixer is finished.
   for(const site of this.sites.values()){
@@ -102,7 +123,7 @@ export class ParallelRecovery{
    if(s.complete||s.claimed[stage]||siteMustPause(s,this.progression.dispatch))return false;
    if(stage==='sweep')return !s.cleared;
    if(stage==='fill')return s.cleared&&s.craters>0;
-   return s.cleared&&!s.craters&&s.damaged;
+   return s.cleared&&!s.craters&&needsHeavyRebuild(s.building);
   });
   pool.sort((a,b)=>{
    const severity=s=>s.building?.floors.filter(f=>f.active).length||0;
@@ -169,8 +190,7 @@ export class ParallelRecovery{
        site.craters=this.world.terrainCraters.filter(c=>near(c,site,16)).length;
        site.crater=this.world.terrainCraters.find(c=>near(c,site,16))||null;
       }
-      if(kind==='build')site.damaged=site.building?.floors.some(e=>
-        e.active||e.health<e.maxHealth)||false;
+      if(kind==='build')site.damaged=needsHeavyRebuild(site.building);
       if(site.cleared&&!site.craters&&!site.damaged)site.complete=true;
      }
      unit.lastFinished=null;

@@ -7,7 +7,7 @@ const V=(x,y,z)=>new Vector3(x,y,z);
 const distance=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
 const allBuildings=w=>[...w.buildings,...(w.districtBuildings||[])];
 const activeDamage=b=>b.floors.some(e=>e.active);
-const anyDamage=b=>b.floors.some(e=>e.active||e.health<e.maxHealth);
+const anyDamage=b=>b.floors.some(e=>e.active);
 const alive=m=>m&&!m.isDisposed();
 const location=m=>m.metadata?.bakedRubble
   ?m.getBoundingInfo().boundingBox.centerWorld
@@ -404,7 +404,9 @@ export class RecoveryConvoy{
    const standing=site.building?.floors.filter(f=>!f.active)
      .reduce((h,f)=>Math.max(h,f.mesh.getAbsolutePosition().y+f.size.y*.5),0)||0;
    this.hoverY=Math.max(17,Math.min(72,Math.max(high,standing)+10));
-   if(this.sweepRuns++===0)this.heli.root.position.set(-CITY_HALF_SIZE-23,this.hoverY+12,site.z);
+   if(this.sweepRuns++===0)
+    this.heli.root.position.set(-CITY_HALF_SIZE+15,this.hoverY+12,
+      Math.max(-CITY_HALF_SIZE+18,Math.min(CITY_HALF_SIZE-18,site.z)));
    this.heli.sling.setEnabled(false);
    setHelicopterWinch(this.heli,4);
   }else if(stage==='fill'){
@@ -544,7 +546,7 @@ export class RecoveryConvoy{
      crane.pallet.setEnabled(true);
     }
    }else if(this.phase==='construct'){
-    const b=site.building,floor=b.floors.find(e=>e.active||e.health<e.maxHealth);
+    const b=site.building,floor=b?.floors.find(e=>e.active);
     if(!floor){
      this.completed++;attractNewResidents(w,w.mobile?2:4);this.finishStage();return true;
     }
