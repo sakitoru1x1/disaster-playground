@@ -245,7 +245,7 @@ function chooseNewPedestrianNode(person){
     :nextTowardNode(person.node,person.routineGoal||person.identity.home,person.previous);
 }
 export function walkPedestrian(person,dt,time=0){
-  if(person.state==='dead'||person.state==='injured')return;
+  if(['dead','injured','evacuating'].includes(person.state))return;
   if(person.state==='sheltering'&&person.shelterTime>0){
     person.shelterTime-=dt;
     person.root.position.y=.07;
@@ -421,7 +421,7 @@ export function updateCityLife(world,dt){
     const stance=person.state==='dead'?.4:person.state==='injured'?.15:
       person.state==='sheltering'?.07:PED_BASE_Y+Math.abs(Math.sin(person.walked))* .025;
     person.root.position.y=stance+displacement;
-    if(person.state==='dead')continue;
+    if(person.state==='dead'||person.state==='evacuating')continue;
     // Falling debris and wrecked vehicles can also strike pedestrians.
     if(world.time%1<dt*4&&world.fragments.length){
       const hit=world.fragments.slice(0,75).some(fragment=>{

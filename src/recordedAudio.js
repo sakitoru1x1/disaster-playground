@@ -305,6 +305,13 @@ export class RecordedSoundscape{
    use('sweep','heli',.81,c=>c.heli?.root.position);
    use('fill','mixer',.60,c=>c.mixer?.root.position);
    use('build','crane',.72,c=>c.crane?.root.position);
+   // One subtle positional construction recording, and only while a
+   // builder crew actually lays floors. Never stack five broadband beds.
+   const nearestBuild=(crews.build||[]).filter(c=>c.phase==='construct')
+     .sort((a,b)=>this.spatial(b.crane?.root.position,65).gain-
+       this.spatial(a.crane?.root.position,65).gain)[0];
+   this.loop('construction',mode*(nearestBuild?.23:0),
+     nearestBuild?.crane?.root.position);
    for(let i=0;i<(crews.build?.length||0);i++){
     const c=crews.build[i];
     this.loop('truck'+i,mode*(c.phase==='arrive'?.48:0),c.truck?.root.position);

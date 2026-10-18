@@ -28,6 +28,8 @@ const {chromium}=require('playwright');
    for(let i=0;i<400;i++){
     result=d.tickRecoveryForTest(2);
     changes.add(result.recovery.stage+':'+result.recovery.phase);
+    for(const [kind,phases] of Object.entries(result.recovery.activeUnitPhases||{}))
+     for(const phase of phases)changes.add(kind+':'+phase);
     if(result.recovery.fleetVisible)sightings.add(result.recovery.stage);
     const h=result.recovery;
     if(h.cargoPieces>0){

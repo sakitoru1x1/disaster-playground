@@ -561,7 +561,21 @@ async function createGame(){
     getEmergency:()=>({fires:world.progression.fires?.stats(),
       dispatch:world.progression.dispatch?.stats(),
       responders:world.responderVehicles?.filter(e=>e.unit?.state!=='idle').map(e=>({
-        name:e.kind,x:e.mesh.position.x,z:e.mesh.position.z,state:e.unit.state}))||[]}),
+        name:e.kind,x:e.mesh.position.x,z:e.mesh.position.z,state:e.unit.state,
+        crewVisible:e.unit.crew.filter(c=>c.root.isEnabled()).length,
+        hoseVisible:!!e.unit.spray?.droplets?.some(m=>m.isEnabled()),
+        stretcherVisible:!!e.unit.stretcher?.root.isEnabled(),
+        visiblePatient:!!e.unit.stretcher?.occupant.isEnabled()}))||[]}),
+    debugRescueCase:(kind='stretcher')=>{
+      const p=world.civilians.find(p=>p.identity&&p.state==='walking');
+      if(!p)return null;
+      p.root.position.set(-132,.17,-112);
+      p.state='injured';p.exposure=kind==='stretcher'?7:0;
+      p.injurySeverity=kind==='stretcher'?1:.2;
+      p.help?.setEnabled(true);
+      world.progression.dispatch?.deploy('ambulance',p);
+      return {x:p.root.position.x,z:p.root.position.z,injury:p.injurySeverity};
+    },
     igniteTestFire:(x=0,z=0,power=.9)=>world.progression.fires?.igniteNear({x,z},power,37),
     citizenPhysics:()=>({
       ragdolls:world.civilians.filter(p=>p.ragdoll).length,

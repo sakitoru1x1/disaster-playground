@@ -28,7 +28,9 @@
     "test:services": "node tests/cityServices.test.mjs",
     "test:services:browser": "node tests/cityServicesBrowser.cjs",
     "test:fire-pet-audio": "node tests/firePetAudio.test.mjs",
-    "test:fly-camera": "node tests/flyCameraBrowser.cjs"
+    "test:fly-camera": "node tests/flyCameraBrowser.cjs",
+    "test:dispatch:e2e": "node tests/dispatchIntegration.cjs",
+    "test:coordination": "node tests/dispatchCoordination.test.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "^9.31.0",

@@ -25,6 +25,7 @@ export class CityFires{
  constructor(world){
   this.world=world;this.fires=new Map();this.clock=0;this.spreadClock=0;
   this.started=0;this.extinguished=0;this.maxFires=world.mobile?5:10;
+  this.effectsUpdated=0;this.effectsSkipped=0;this.maxEmbers=world.mobile?3:7;
   const scene=world.scene;
   this.flameMat=new StandardMaterial('ACTIVE FIRE BRIGHT ORANGE',scene);
   this.flameMat.diffuseColor=Color3.FromHexString('#ff4d1b');
@@ -37,7 +38,11 @@ export class CityFires{
   this.smokeMat=new StandardMaterial('ACTIVE FIRE GREY SMOKE',scene);
   this.smokeMat.diffuseColor=Color3.FromHexString('#373b46');
   this.smokeMat.emissiveColor=Color3.FromHexString('#25282e');
-  this.smokeMat.disableLighting=true;this.smokeMat.alpha=.44;
+  this.smokeMat.disableLighting=true;this.smokeMat.alpha=.36;
+  this.emberMat=new StandardMaterial('FIRE FLYING SPARKS',scene);
+  this.emberMat.diffuseColor=Color3.FromHexString('#ffd07e');
+  this.emberMat.emissiveColor=Color3.FromHexString('#ffae47');
+  this.emberMat.disableLighting=true;
  }
  chooseAnchor(building){
   const ground=terrainDisplacement(building.x,building.z,
@@ -49,6 +54,16 @@ export class CityFires{
   // to display floating fire and the smoke must follow the new burn site.
   f.anchor.copyFrom(this.chooseAnchor(f.building));
   const anchor=f.anchor,heat=f.heat;
+  const camera=this.world.scene.activeCamera;
+  const observer=camera?.globalPosition||camera?.position||anchor;
+  const distance=Math.hypot(observer.x-anchor.x,observer.z-anchor.z,
+    (observer.y-anchor.y)*.52);
+  const drawRadius=this.world.mobile?185:340;
+  // Switch off secondary meshes at long range. Physics and extinguishing
+  // continue unaffected while expensive translucent smoke isn't drawn.
+  const distant=distance>drawRadius;
+  if(distant&&f.age-f.lastVisualUpdate<.24){this.effectsSkipped++;return}
+  f.lastVisualUpdate=f.age;this.effectsUpdated++;
   for(let i=0;i<f.flames.length;i++){
    const mesh=f.flames[i];
    mesh.position.set(anchor.x+(i-1)*.9,
@@ -56,17 +71,27 @@ export class CityFires{
      anchor.z+(i%2-.5)*1.6);
    mesh.scaling.y=(.85+Math.sin(f.age*7+i*1.9)*.30)*heat;
    mesh.scaling.x=(.70+Math.sin(f.age*3.7+i)*.14)*heat;
-   mesh.setEnabled(heat>.03);
+   mesh.setEnabled(heat>.03&&(!distant||i===1));
   }
   for(let i=0;i<f.smoke.length;i++){
    const mesh=f.smoke[i];
    mesh.position.set(anchor.x+i*.24+Math.sin(f.age*.8+i)*.56,
      anchor.y+2+i*1.65+(f.age*.75%2),anchor.z-.5);
    mesh.scaling.setAll((1+i*.22)*(.8+heat*.58));
+   mesh.setEnabled(heat>.03&&(!distant||i===0));
+  }
+  for(let i=0;i<f.embers.length;i++){
+   const m=f.embers[i],phase=(f.age*.38+(i+.5)/f.embers.length)%1;
+   m.position.set(anchor.x+Math.sin(f.age*2.7+i*2.1)*(phase*1.15+.3),
+     anchor.y+.55+phase*5.2,
+     anchor.z+Math.cos(f.age*1.9+i*2.2)*(phase*.95+.3));
+   const size=.6*(1-phase)*heat+.04;
+   m.scaling.setAll(size);
+   m.setEnabled(!distant&&heat>.16);
   }
   if(f.light){
    f.light.position.copyFrom(anchor).addInPlaceFromFloats(0,2,0);
-   f.light.intensity=(2.2+Math.sin(f.age*15)*.9)*heat;
+   f.light.intensity=distant?0:(2.2+Math.sin(f.age*15)*.9)*heat;
   }
  }
  ignite(building,strength=.55){
@@ -79,7 +104,8 @@ export class CityFires{
   const anchor=this.chooseAnchor(building),scene=this.world.scene;
   const flames=[],smoke=[];
   for(let i=0;i<3;i++){
-   const f=MeshBuilder.CreateSphere('BUILDING FIRE FLAME',{diameter:1.8,segments:8},scene);
+   const f=MeshBuilder.CreateCylinder('BUILDING FIRE FLAME',
+     {diameterTop:.08,diameterBottom:1.85,height:2.35,tessellation:7},scene);
    f.position=anchor.add(V((i-1)*.9,i*.44,(i%2-.5)*1.6));
    f.scaling=V(.75,.9+(i%2)*.55,.65);f.material=i===1?this.coreMat:this.flameMat;
    f.isPickable=false;flames.push(f);
@@ -90,10 +116,19 @@ export class CityFires{
    cloud.scaling=V(1.0+i*.30,.7+i*.22,1+i*.30);cloud.material=this.smokeMat;
    cloud.isPickable=false;smoke.push(cloud);
   }
+  // Every ember is reused for the lifetime of this fire; no per-frame
+  // allocations and only three on mobile.
+  const embers=[];
+  for(let i=0;i<this.maxEmbers;i++){
+   const m=MeshBuilder.CreateSphere('FIRE RISING EMBER',
+     {diameter:.30,segments:5},scene);
+   m.material=this.emberMat;m.isPickable=false;embers.push(m);
+  }
   const light=!this.world.mobile&&this.fires.size<3
    ?new PointLight('FLICKERING FIRE LIGHT',anchor.add(V(0,2,0)),scene):null;
   if(light){light.diffuse=Color3.FromHexString('#ff7e37');light.range=15;light.intensity=3}
-  this.fires.set(key,{building,x:building.x,z:building.z,anchor,flames,smoke,light,
+  this.fires.set(key,{building,x:building.x,z:building.z,anchor,
+   flames,smoke,embers,light,lastVisualUpdate:-1,
    heat:clamp(strength,.25,1),age:0,lastDamage:0,extinguishing:0});
   this.started++;return true;
  }
@@ -119,7 +154,7 @@ export class CityFires{
   fire.extinguishing=1;
   fire.heat=Math.max(0,fire.heat-amount);
   if(fire.heat<=.02){
-   for(const m of [...fire.flames,...fire.smoke])m.dispose();
+   for(const m of [...fire.flames,...fire.smoke,...fire.embers])m.dispose();
    fire.light?.dispose();this.fires.delete(fire.building.id);
    this.extinguished++;this.world.audio?.play('pour',fire.anchor,.5);
    return true;
@@ -152,5 +187,7 @@ export class CityFires{
    }
   }
  }
- stats(){return {burning:this.fires.size,started:this.started,extinguished:this.extinguished}}
+ stats(){return {burning:this.fires.size,started:this.started,extinguished:this.extinguished,
+   embers:this.fires.size*this.maxEmbers,effectsUpdated:this.effectsUpdated,
+   effectsSkipped:this.effectsSkipped}}
 }

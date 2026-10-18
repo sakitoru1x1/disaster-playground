@@ -104,7 +104,7 @@ export class CityProgression {
    if(medic.role!=='medic'||medic.state==='dead'||medic.state==='injured')continue;
    let nearest=null,best=1e9;
    for(const p of world.civilians){
-    if(p.state!=='injured')continue;
+    if(p.state!=='injured'||this.dispatch?.activeUnits('ambulance').some(u=>u.patient===p))continue;
     const r=distance(medic.root.position,civilianPosition(p));
     if(r<best){best=r;nearest=p}
    }
@@ -158,7 +158,7 @@ export class CityProgression {
  helpNearest(pos){
   let found=null,distance=3.3;
   for(const p of this.world.civilians){
-   if(p.state!=='injured')continue;
+   if(p.state!=='injured'||this.dispatch?.activeUnits('ambulance').some(u=>u.patient===p))continue;
    const at=civilianPosition(p);
    const r=Math.hypot(at.x-pos.x,at.z-pos.z,(at.y-pos.y)*.6);
    if(r<distance){found=p;distance=r}

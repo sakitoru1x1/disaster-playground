@@ -1,5 +1,7 @@
 import {RecoveryConvoy,recoverySite} from './cityRecovery.js';
 import {civilianPosition} from './citizenRagdolls.js';
+import {WorksiteVisuals} from './worksiteVisuals.js';
+import {siteMustPause} from './worksiteVisuals.js';
 
 // Independent local lots. Work at lot A can be in concrete while the
 // helicopter is still carrying real wreckage away from lot B.
@@ -22,13 +24,14 @@ export class ParallelRecovery{
   this.sites=new Map();this.ids=0;this.clock=0;
   this.removed=0;this.filled=0;this.completed=0;
   this.stage='sweep';this.phase='idle';this.heli=null;this.crane=null;this.mixer=null;
-  this.eventCount=0;
+  this.eventCount=0;this.worksites=world.scene&&world.box?new WorksiteVisuals(world):null;
  }
  event(){
   // Newly damaged properties are re-assessed. Active machinery returns to
   // depot rather than continuing to pour/build during a second catastrophe.
   for(const pool of Object.values(this.units))for(const unit of pool)unit.event();
   this.sites.clear();this.eventCount++;this.stage='sweep';this.phase='idle';
+  this.worksites?.update(0,this);
  }
  hasNearbyVictim(site){
   for(const p of this.world.civilians||[]){
@@ -96,7 +99,7 @@ export class ParallelRecovery{
  }
  jobs(stage){
   const pool=[...this.sites.values()].filter(s=>{
-   if(s.complete||s.claimed[stage]||s.fire||s.victims)return false;
+   if(s.complete||s.claimed[stage]||siteMustPause(s,this.progression.dispatch))return false;
    if(stage==='sweep')return !s.cleared;
    if(stage==='fill')return s.cleared&&s.craters>0;
    return s.cleared&&!s.craters&&s.damaged;
@@ -121,6 +124,7 @@ export class ParallelRecovery{
     continue;
    }
    site.claimed[stage]=unit;
+   this.worksites?.claim(site,stage);
    const target={...site,crater:site.crater,radius:17};
    if(stage==='fill'&&site.crater){
     target.x=site.crater.x;target.z=site.crater.z;
@@ -137,6 +141,17 @@ export class ParallelRecovery{
   for(const [kind,pool] of Object.entries(this.units)){
    for(const unit of pool){
     const previous=unit.site?.key;
+    const assigned=previous&&this.sites.get(previous);
+    // Never pour concrete or lift floors around a newly arriving ambulance
+    // or a spreading fire. If the helicopter already has a load, it should
+    // finish flying it to the dump rather than dropping it on rescuers.
+    if(unit.phase!=='idle'&&assigned&&siteMustPause(assigned,this.progression.dispatch)&&
+       !(kind==='sweep'&&['collect','lift','haul'].includes(unit.phase))){
+      unit.event();
+      delete assigned.claimed[kind];
+      if(kind==='sweep')assigned.cleared=false;
+      continue;
+    }
     if(unit.phase!=='idle')unit.tick(dt);
     // Cleanup is safe to consider complete once chunks are physically
     // loaded and the helicopter is ascending. It can still fly offshore
@@ -165,12 +180,14 @@ export class ParallelRecovery{
   this.assign('sweep',this.maxHelis);
   this.assign('fill',this.maxMixers);
   this.assign('build',this.maxCranes);
+  this.worksites?.update(dt,this);
   // Compatibility with the old HUD/debug surface, now with per-service
   // counters and all active machines enumerated.
   const busy=Object.entries(this.units).flatMap(([type,pool])=>
     pool.filter(p=>p.phase!=='idle').map(p=>({type,unit:p})));
   const focus=busy.find(x=>x.type==='build')||busy.find(x=>x.type==='fill')||busy[0];
-  const blocked=[...this.sites.values()].some(s=>!s.complete&&recoverySiteStatus(s)==='blocked');
+  const blocked=[...this.sites.values()].some(s=>!s.complete&&
+    siteMustPause(s,this.progression.dispatch));
   this.stage=focus?.type||(this.jobs('sweep').length?'sweep':
     this.jobs('fill').length?'fill':this.jobs('build').length?'build':blocked?'blocked':'complete');
   this.phase=focus?.unit.phase||'idle';
@@ -185,15 +202,27 @@ export class ParallelRecovery{
  currentState(){
   const active=(stage)=>this.units[stage].filter(p=>p.phase!=='idle');
   const sweeps=active('sweep'),fills=active('fill'),builds=active('build');
-  const primary=builds[0]||fills[0]||sweeps[0];
+  const primary=sweeps[0]||fills[0]||builds[0];
   const s=primary?.currentState()||{};
-  return {...s,stage:this.stage,phase:this.phase,removed:this.removed,
+  const visibleHeli=sweeps.find(u=>u.heli?.load?.length)||sweeps[0];
+  const visibleCrane=builds.find(u=>u.crane?.tower?.scaling?.y>.98)||builds[0];
+  const heli=visibleHeli?.currentState()||{},crane=visibleCrane?.currentState()||{};
+  return {...s,stage:this.stage,phase:this.phase,
+   cargoPieces:heli.cargoPieces||0,
+   carriedRealRubble:!!heli.carriedRealRubble,
+   firstCargoY:heli.firstCargoY??null,
+   hoverOverTarget:!!heli.hoverOverTarget,
+   towerHeight:crane.towerHeight||null,jibLength:crane.jibLength||null,
+   craneStyle:crane.craneStyle||null,craneMastRaised:crane.craneMastRaised||0,
+   removed:this.removed,
    cratersFilled:this.filled,buildingsRestored:this.completed,
    helicopters:sweeps.length,concreteMixers:fills.length,constructionCranes:builds.length,
    dispatchedHelicopters:this.units.sweep.length,
    fleetVisible:[...sweeps,...fills,...builds].reduce((n,p)=>n+p.currentState().fleetVisible,0),
    activeStages:{sweep:sweeps.length,fill:fills.length,build:builds.length},
+   activeUnitPhases:{sweep:sweeps.map(u=>u.phase),fill:fills.map(u=>u.phase),build:builds.map(u=>u.phase)},
    simultaneous:sweeps.length+fills.length+builds.length,
+   workzones:this.worksites?.stats()||{active:0,pool:0,barriers:0,workers:0},
    sites:[...this.sites.values()].map(p=>({key:p.key,x:p.x,z:p.z,
     phase:recoverySiteStatus(p),claimed:Object.keys(p.claimed),
     fire:p.fire,victims:p.victims})).slice(0,100)
