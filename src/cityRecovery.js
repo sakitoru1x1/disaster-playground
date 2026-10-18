@@ -24,7 +24,13 @@ export function recoverySite(world,visited=new Set()){
  if(buildings.length){
   buildings.sort((a,b)=>b.floors.filter(e=>e.active).length-a.floors.filter(e=>e.active).length);
   const b=buildings[0];
-  return {key:'b'+b.id,x:b.x,z:b.z,building:b,radius:17};
+  // Rotorcraft aligns over the centroid of the actual fallen slabs,
+  // not an arbitrary map marker at the original facade center.
+  const pieces=looseMeshes(world).filter(m=>distance(location(m),b)<17);
+  const center=pieces.reduce((a,m)=>{const p=location(m);a.x+=p.x;a.z+=p.z;return a},{x:0,z:0});
+  const hoverX=pieces.length?b.x+Math.max(-6,Math.min(6,center.x/pieces.length-b.x)):b.x;
+  const hoverZ=pieces.length?b.z+Math.max(-6,Math.min(6,center.z/pieces.length-b.z)):b.z;
+  return {key:'b'+b.id,x:b.x,z:b.z,hoverX,hoverZ,building:b,radius:17};
  }
  // Also clear impact rubble on roads and parks before concrete work starts.
  for(const mesh of looseMeshes(world)){
@@ -35,17 +41,20 @@ export function recoverySite(world,visited=new Set()){
  }
  return null;
 }
-export function clearRecoverySite(world,site){
- let removed=0;const gone=new Set();
+// A real transport manifest: remove rubble from simulation bookkeeping, but
+// keep the original *visible meshes* until they have travelled to the dump.
+// Physics bodies must be detached before linking debris to the lift sling.
+export function detachRecoveryDebris(world,site){
+ const cargo=[],gone=new Set();
  const near=m=>alive(m)&&distance(location(m),site)<site.radius;
- // Keep these lists in sync; physics bodies are disposed BEFORE visual meshes.
  for(const name of ['fragments','debris']){
   const source=world[name]||[];
   for(let i=source.length-1;i>=0;i--){
    const item=source[i],mesh=item.mesh;
    if(!near(mesh))continue;
    item.aggregate?.dispose();item.aggregate=null;
-   gone.add(mesh);mesh.dispose();source.splice(i,1);removed++;
+   mesh.physicsBody?.dispose(); // remove any remaining Havok owner
+   cargo.push(mesh);gone.add(mesh);source.splice(i,1);
    world.activeBodies=Math.max(0,world.activeBodies-1);
   }
  }
@@ -54,7 +63,8 @@ export function clearRecoverySite(world,site){
   for(let i=source.length-1;i>=0;i--){
    const item=source[i],mesh=item.mesh||item;
    if(!near(mesh))continue;
-   gone.add(mesh);mesh.dispose();source.splice(i,1);removed++;
+   mesh.physicsBody?.dispose();
+   cargo.push(mesh);gone.add(mesh);source.splice(i,1);
   }
  }
  if(world.pendingSecondary)world.pendingSecondary=world.pendingSecondary.filter(job=>
@@ -62,7 +72,12 @@ export function clearRecoverySite(world,site){
  if(world.visualFractureQueue)world.visualFractureQueue=world.visualFractureQueue.filter(job=>
    job.part?.mesh&&!gone.has(job.part.mesh)&&alive(job.part.mesh));
  if(world.rubble)world.rubble=world.rubble.filter(alive);
- return removed;
+ return cargo;
+}
+export function clearRecoverySite(world,site){
+ const cargo=detachRecoveryDebris(world,site);
+ for(const mesh of cargo)mesh.dispose();
+ return cargo.length;
 }
 export function restoreBuildingFloor(world,building,floor){
  if(!floor||!alive(floor.mesh)||(!floor.active&&floor.health>=floor.maxHealth))return false;
@@ -117,12 +132,26 @@ function buildHelicopter(w){
  for(const angle of [0,Math.PI/2]){
   const b=w.box('tail rotor blade',[.08,1.7,.08],V(0,0,0),dark,tail);b.rotation.z=angle;
  }
- const cable=w.cylinder('HELICOPTER CARGO CABLE',.07,8,V(0,-5.8,0),dark,6,root);
- const cargo=w.box('RECOVERY CARGO NET',[3,2.4,3],V(0,-10.4,0),
-   w.mat('cargo net','#747d6d'),root);
- cargo.setEnabled(false);
+ // Cargo hangs from a *lowering* winch; no fake box covering the debris.
+ // The load's true original rubble meshes are attached to this sling while
+ // the cable retracts. The hook swings slightly under acceleration.
+ const cable=w.cylinder('HELICOPTER WINCH STEEL LINE',.085,1,V(0,-3,0),dark,8,root);
+ const sling=new TransformNode('HELICOPTER SUSPENDED RUBBLE SLING',w.scene);
+ sling.parent=root;sling.position=V(0,-13,0);
+ const net=w.mat('cargo recovery web','#98a18b');
+ const cargo=w.box('SUSPENDED CARGO PLATFORM',[6,.22,5.6],V(0,-.65,0),net,sling);
+ cargo.visibility=.68;
+ for(const side of [-1,1]){
+  w.box('cargo safety net',[.13,1.3,5.6],V(side*3,-.01,0),net,sling);
+  w.box('cargo safety net',[6,1.3,.13],V(0,-.01,side*2.8),net,sling);
+ }
+ for(const side of [-1,1]){
+  const strap=w.cylinder('winch sling rigging',.065,5.8,V(side*1.5,2,0),dark,6,sling);
+  strap.rotation.z=side*.53;
+ }
+ sling.setEnabled(false);
  root.setEnabled(false);
- return {root,main,tail,cable,cargo};
+ return {root,main,tail,cable,cargo,sling,load:[],height:18,rotorWash:0};
 }
 function buildMixer(w){
  const root=new TransformNode('RECOVERY CONCRETE MIXER',w.scene);
@@ -147,24 +176,80 @@ function buildMixer(w){
  const chute=w.box('concrete pouring chute',[.9,.19,4],V(0,.55,-4.45),cement,root);
  root.setEnabled(false);return {root,drum,chute};
 }
-function buildRig(w){
- const root=new TransformNode('RECOVERY MOBILE CRANE',w.scene);
- root.position=V(-CITY_HALF_SIZE-17,.8,0);
- const chassis=w.mat('recovery crane yellow','#ffcf44'),black=w.mat('recovery tires','#333943');
- w.box('mobile crane chassis',[3.1,.75,9.4],V(0,0,0),black,root);
- w.box('mobile crane cab',[2.8,2.4,2.9],V(0,1.15,3.05),chassis,root);
- for(const side of [-1,1])for(const z of [-3.2,0,3.1]){
-  const wheel=w.cylinder('mobile crane wheel',1.25,.44,V(side*1.7,-.42,z),black,10,root);
-  wheel.rotation.z=Math.PI/2;
+// True fixed-site lattice tower crane. It is assembled vertically at each
+// rebuilding lot and rotates its horizontal jib over the foundations; it is
+// NOT a small driving crane with a tilted boom.
+export function buildTowerCrane(w){
+ const root=new TransformNode('TOWER CRANE CONSTRUCTION SITE',w.scene);
+ root.position=V(0,.15,0);
+ const yellow=w.mat('tower crane safety yellow','#e9b43a');
+ const red=w.mat('tower crane counterweight red','#c65b3a');
+ const steel=w.mat('tower crane structural steel','#555c65');
+ w.box('tower crane reinforced base',[6,.6,6],V(0,0,0),steel,root);
+ const tower=new TransformNode('TOWER CRANE 58 METRE LATTICE MAST',w.scene);
+ tower.parent=root;tower.position.y=.4;
+ const mastHeight=54,module=6,mastSide=2.8;
+ for(let k=0;k<mastHeight/module;k++){
+  const y=k*module+module/2;
+  for(const sideX of [-1,1])for(const sideZ of [-1,1]){
+   w.box('tower crane vertical lattice chord',[.23,module,.23],
+     V(sideX*mastSide/2,y,sideZ*mastSide/2),yellow,tower);
+  }
+  for(const edge of [-1,1]){
+   for(const tilt of [-1,1]){
+    const cross=w.box('tower crane diagonal bracing',[.13,Math.hypot(module,mastSide),.13],
+      V(edge*mastSide/2,y,0),yellow,tower);
+    cross.rotation.x=tilt*Math.atan2(mastSide,module);
+    const cross2=w.box('tower crane X bracing',[.13,Math.hypot(module,mastSide),.13],
+      V(0,y,edge*mastSide/2),yellow,tower);
+    cross2.rotation.z=tilt*Math.atan2(mastSide,module);
+   }
+  }
  }
- const pivot=new TransformNode('ACTIVE CRANE BOOM PIVOT',w.scene);
- pivot.parent=root;pivot.position=V(0,2.1,-1.65);
- const boom=w.box('ACTIVE CONSTRUCTION BOOM',[.8,.8,19],V(0,6.9,4.7),chassis,pivot);
- boom.rotation.x=-.56;
- const hook=w.cylinder('ACTIVE HOIST CABLE',.10,13,V(0,10,-5.2),black,7,pivot);
- const pallet=w.box('LIFTED CONCRETE PANEL',[4,.32,2.6],V(0,3,-5),w.materials.sidewalk,pivot);
+ // Rotates around mast axis above a slewing ring at y≈55 metres.
+ const jib=new TransformNode('TOWER CRANE ROTATING JIB',w.scene);
+ jib.parent=root;jib.position.y=mastHeight+.55;
+ w.cylinder('tower crane slewing platform',3.7,.9,V(0,0,0),steel,12,jib);
+ w.box('crane operator cab',[2.2,2.2,2.5],V(-2.2,-1.4,1.8),red,jib);
+ w.box('tower crane head apex',[.45,7,.45],V(0,4,0),yellow,jib);
+ const boomLength=47, counterLength=17;
+ // Long horizontal lattice jib extends +Z: side rails, under-rail,
+ // periodic triangular struts and suspension ties.
+ for(const x of [-.95,.95]){
+  w.box('tower crane main jib chord',[.17,.22,boomLength],
+    V(x,0,boomLength/2),yellow,jib);
+  w.box('tower crane upper jib chord',[.15,.18,boomLength],
+    V(x,1.65,boomLength/2),yellow,jib);
+  w.box('tower crane counter jib chord',[.22,.23,counterLength],
+    V(x,0,-counterLength/2),yellow,jib);
+ }
+ for(let k=1;k<13;k++){
+  const z=k*boomLength/13;
+  w.box('crane lattice transverse bar',[2.0,.16,.15],V(0,0,z),yellow,jib);
+  for(const side of [-1,1]){
+   const brace=w.box('crane lattice diagonal',[.12,2.8,.12],V(side*.95,.85,z-1),yellow,jib);
+   brace.rotation.x=k%2?.72:-.72;
+  }
+ }
+ for(const z of [-7,-11,-15]){
+  w.box('tower crane counterweight',[3.6,1.7,2.7],V(0,-1.35,z),steel,jib);
+ }
+ for(const z of [20,43]){
+  const stay=w.box('suspended tower crane guy wire',[.08,Math.hypot(z,6),.08],
+   V(0,4.5,z/2),steel,jib);
+  stay.rotation.x=Math.atan2(z,6);
+ }
+ const trolley=new TransformNode('TOWER CRANE MOVING TROLLEY',w.scene);
+ trolley.parent=jib;trolley.position=V(0,-.18,18);
+ w.box('tower crane travelling trolley',[2.1,.65,2.5],V(0,0,0),steel,trolley);
+ const cable=w.cylinder('TOWER CRANE HOIST CABLE',.08,1,V(0,-2,0),steel,7,trolley);
+ const hook=w.cylinder('tower crane hanging hook',.46,.7,V(0,-3.4,0),red,10,trolley);
+ const pallet=w.box('TOWER CRANE PRECAST LIFT',[4,.36,3],V(0,-4.2,0),
+   w.materials.sidewalk,trolley);
+ pallet.setEnabled(false);
  root.setEnabled(false);
- return {root,pivot,boom,hook,pallet};
+ return {root,tower,jib,trolley,cable,hook,pallet,mastHeight,boomLength,
+   targetX:0,targetZ:0,progress:0};
 }
 function buildTruck(w){
  const root=new TransformNode('RECOVERY MATERIALS TRUCK',w.scene);
@@ -186,21 +271,87 @@ function buildTruck(w){
 function staging(site){
  return {x:site.x+13,z:site.z-13,y:.85};
 }
+const clamp=(v,min,max)=>Math.min(max,Math.max(min,v));
+const smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t)};
+
+// Winch rope is always anchored to the fuselage, and ends at the same sling
+// position as the physical rubble cargo. The cable length really changes.
+export function setHelicopterWinch(heli,length){
+ const rope=Math.max(3.2,length);
+ heli.height=rope;
+ heli.sling.position.y=-rope;
+ heli.cable.position.y=-(rope+2.1)/2;
+ heli.cable.scaling.y=Math.max(.1,rope-2.1);
+}
+function beginCargoPickup(heli,debris){
+ heli.load.length=0;
+ const many=debris.length;
+ for(let i=0;i<many;i++){
+  const mesh=debris[i];
+  if(!alive(mesh))continue;
+  // A formerly frozen draw-call batch may be transformed again while flying.
+  mesh.unfreezeWorldMatrix?.();
+  mesh.computeWorldMatrix?.(true);
+  mesh.setParent(heli.sling);
+  const start=mesh.position.clone();
+  const angle=i*2.399963229728653;
+  const radius=1.9*Math.sqrt((i+.5)/Math.max(1,many));
+  const end=V(Math.cos(angle)*radius,-.15+Math.floor(i/18)*.28,
+    Math.sin(angle)*radius);
+  heli.load.push({mesh,start,end});
+ }
+}
+function animateCargoPickup(heli,t){
+ const eased=smooth(t);
+ for(const item of heli.load){
+  if(!alive(item.mesh))continue;
+  Vector3.LerpToRef(item.start,item.end,eased,item.mesh.position);
+  item.mesh.rotation.y+=.006; // small movement as pieces settle into the net
+ }
+}
+function dumpCargo(heli){
+ const count=heli.load.length;
+ for(const item of heli.load){if(alive(item.mesh))item.mesh.dispose()}
+ heli.load.length=0;heli.sling.setEnabled(false);
+ heli.sling.rotation.setAll(0);
+ return count;
+}
+function updateTowerLift(crane,building,elapsed){
+ const floor=building?.floors.find(e=>e.active||e.health<e.maxHealth);
+ if(!floor)return false;
+ const dx=building.x-crane.root.position.x,dz=building.z-crane.root.position.z;
+ const dist=Math.hypot(dx,dz);
+ const aim=Math.atan2(dx,dz);
+ crane.jib.rotation.y=aim+Math.sin(elapsed*1.5)*.007;
+ const trolleyProgress=smooth((elapsed-.3)/2.2);
+ crane.trolley.position.z=4+(clamp(dist,7,crane.boomLength-3)-4)*trolleyProgress;
+ const liftProgress=smooth(elapsed/2.55);
+ const floorY=floor.mesh.getAbsolutePosition().y;
+ const rope=clamp(crane.mastHeight-(1.6+(floorY+2.8-1.6)*liftProgress),
+   2.2,crane.mastHeight-2);
+ crane.cable.scaling.y=rope;
+ crane.cable.position.y=-rope/2-.38;
+ crane.hook.position.y=-rope-.47;
+ crane.pallet.position.y=-rope-1.04;
+ crane.pallet.rotation.z=Math.sin(elapsed*2)*.035;
+ return true;
+}
 export class RecoveryConvoy{
  constructor(world,progression){
   this.world=world;this.progression=progression;
   this.phase='idle';this.stage='sweep';this.elapsed=0;this.site=null;
-  this.visited=new Set();this.buildingIndex=0;this.floorIndex=0;
+  this.visited=new Set();this.floorIndex=0;
   this.removed=0;this.filled=0;this.completed=0;this.sweepRuns=0;
   this.heli=null;this.mixer=null;this.crane=null;this.truck=null;
   this.pourPatch=null;this.pourStream=null;
+  this.hoverY=20;this.collected=0;
  }
  event(){
   this.stage='sweep';this.phase='idle';this.site=null;this.elapsed=0;
   this.visited.clear();this.sweepRuns=0;
+  if(this.heli)dumpCargo(this.heli);
   this.park();
   this.pourStream?.dispose();this.pourStream=null;
-  // An interrupted pour must not remain above a new crater.
   this.pourPatch?.dispose();this.pourPatch=null;
  }
  park(){
@@ -210,13 +361,26 @@ export class RecoveryConvoy{
  initFleet(){
   if(this.heli)return;
   const w=this.world;this.heli=buildHelicopter(w);
-  this.mixer=buildMixer(w);this.crane=buildRig(w);this.truck=buildTruck(w);
+  this.mixer=buildMixer(w);this.crane=buildTowerCrane(w);this.truck=buildTruck(w);
  }
  currentState(){
-  return {stage:this.stage,phase:this.phase,target:this.site?.building?.name||
-    (this.site?Math.round(this.site.x)+','+Math.round(this.site.z):null),
+  const helicopter=this.heli?.root,site=this.site;
+  return {stage:this.stage,phase:this.phase,target:site?.building?.name||
+    (site?Math.round(site.x)+','+Math.round(site.z):null),
     removed:this.removed,cratersFilled:this.filled,buildingsRestored:this.completed,
-    fleetVisible:[this.heli,this.mixer,this.crane,this.truck].filter(v=>v?.root.isEnabled()).length};
+    fleetVisible:[this.heli,this.mixer,this.crane,this.truck].filter(v=>v?.root.isEnabled()).length,
+    cargoPieces:this.heli?.load.length||0,
+    carriedRealRubble:!!this.heli?.load.length&&this.heli.load.every(item=>item.mesh.parent===this.heli.sling),
+    firstCargoY:this.heli?.load.length?this.heli.load[0].mesh.getAbsolutePosition().y:null,
+    hoverOverTarget:!!helicopter&&!!site&&
+      Math.hypot(helicopter.position.x-(site.hoverX??site.x),
+        helicopter.position.z-(site.hoverZ??site.z))<1.8,
+    helicopterAltitude:helicopter?.position.y??null,
+    slingAltitude:helicopter?helicopter.position.y-(this.heli?.height||0):null,
+    towerHeight:this.crane?.mastHeight||null,jibLength:this.crane?.boomLength||null,
+    craneMastRaised:this.crane?.tower.scaling.y||0,
+    trolleyDistance:this.crane?.trolley.position.z||0,
+    craneStyle:this.crane?'lattice tower crane':null};
  }
  start(stage,site){
   this.stage=stage;this.site=site;this.phase='arrive';this.elapsed=0;
@@ -225,32 +389,45 @@ export class RecoveryConvoy{
   agent.root.setEnabled(true);
   if(stage==='build')this.truck.root.setEnabled(true);
   if(stage==='sweep'){
-   if(this.sweepRuns++===0)agent.root.position.set(-CITY_HALF_SIZE-18,50,site.z);
-   agent.root.position.y=50;
-   agent.cargo.setEnabled(false);
-  }else{
+   // The helicopter hovers directly over the ACTUAL rubble, not fifty
+   // metres above it. Clear tallest nearby slab/facade with a 10m margin.
+   const chunks=looseMeshes(this.world).filter(m=>distance(location(m),site)<site.radius);
+   const high=chunks.reduce((h,m)=>Math.max(h,location(m).y),0);
+   const standing=site.building?.floors.filter(f=>!f.active)
+     .reduce((h,f)=>Math.max(h,f.mesh.getAbsolutePosition().y+f.size.y*.5),0)||0;
+   this.hoverY=Math.max(17,Math.min(72,Math.max(high,standing)+10));
+   if(this.sweepRuns++===0)this.heli.root.position.set(-CITY_HALF_SIZE-23,this.hoverY+12,site.z);
+   this.heli.sling.setEnabled(false);
+   setHelicopterWinch(this.heli,4);
+  }else if(stage==='fill'){
    agent.root.position.set(-CITY_HALF_SIZE-17,.8,staging(site).z);
-   if(stage==='build')this.truck.root.position.set(-CITY_HALF_SIZE-23,.8,staging(site).z+5);
+  }else{
+   // The stationary tower crane rises IN PLACE next to the construction
+   // plot. The only arriving vehicle is the materials delivery truck.
+   agent.root.position.set(site.x+14,.15,site.z-14);
+   agent.tower.scaling.y=.01;
+   agent.jib.position.y=1;
+   agent.jib.rotation.y=Math.atan2(site.x-agent.root.position.x,
+     site.z-agent.root.position.z);
+   agent.pallet.setEnabled(false);
+   this.truck.root.position.set(-CITY_HALF_SIZE-23,.8,staging(site).z+5);
   }
  }
  finishStage(){
   this.park();this.phase='idle';this.site=null;this.elapsed=0;
-  this.pourStream?.dispose();this.pourStream=null;
-  this.pourPatch=null;
+  this.pourStream?.dispose();this.pourStream=null;this.pourPatch=null;
+  if(this.heli?.load.length)dumpCargo(this.heli);
+  this.crane?.pallet.setEnabled(false);
  }
  tick(dt){
   const w=this.world;this.elapsed+=dt;
-  if(this.heli){this.heli.main.rotation.y+=dt*20;this.heli.tail.rotation.x+=dt*23}
-  if(this.mixer)this.mixer.drum.rotation.z+=dt*1.6;
-  if(this.crane){
-   this.crane.pivot.rotation.y=Math.sin(this.elapsed*1.25)*.23;
-   const active=this.stage==='build'&&this.phase==='construct'&&this.site?.building;
-   const f=active&&this.site.building.floors.find(e=>e.active);
-   this.crane.pallet.position.y=f
-     ?2+Math.max(0,f.mesh.position.y-3)*Math.min(1,this.elapsed/1.25)
-     :3+Math.abs(Math.sin(this.elapsed*1.8))*4;
-   this.crane.hook.scaling.y=f?Math.max(.32,1-this.crane.pallet.position.y/32):1;
+  if(this.heli){
+   this.heli.main.rotation.y+=dt*20;
+   this.heli.tail.rotation.x+=dt*23;
+   if(this.heli.sling.isEnabled())
+    this.heli.sling.rotation.z=Math.sin(w.time*1.25)*.045;
   }
+  if(this.mixer)this.mixer.drum.rotation.z+=dt*1.6;
   if(this.phase==='idle'){
    if(this.stage==='sweep'){
     const site=recoverySite(w,this.visited);
@@ -258,8 +435,7 @@ export class RecoveryConvoy{
     this.stage='fill';
    }
    if(this.stage==='fill'){
-    // Fresh debris may still settle while the last seismic cascades end.
-    // Sweep it before dispatching trucks, including previously cleaned lots.
+    // Newly settled debris must be removed before concrete can be poured.
     if(looseMeshes(w).length){
      this.visited=new Set([...this.visited].filter(key=>key.startsWith('b')));
      this.stage='sweep';return true;
@@ -276,23 +452,42 @@ export class RecoveryConvoy{
    return false;
   }
   if(this.stage==='sweep'){
-   const heli=this.heli,site=this.site,target={x:site.x,z:site.z,y:50};
-   const reached=travel(heli.root,target,dt,26);
-   if(reached&&this.phase==='arrive'){this.phase='collect';this.elapsed=0;heli.cargo.setEnabled(true)}
-   if(this.phase==='collect'){
-    heli.cargo.scaling.setAll(1+Math.sin(this.elapsed*4)*.12);
-    heli.cable.scaling.y=1+Math.sin(this.elapsed*2)*.05;
-    if(this.elapsed>2.6){
-     this.removed+=clearRecoverySite(w,site);
-     this.visited.add(site.key);
+   const heli=this.heli,site=this.site;
+   if(this.phase==='arrive'){
+    const near=travel(heli.root,{x:site.hoverX??site.x,z:site.hoverZ??site.z,y:this.hoverY},dt,33);
+    if(near&&Math.abs(heli.root.position.y-this.hoverY)<.8){
+     this.phase='lower';this.elapsed=0;heli.sling.setEnabled(true);
+    }
+   }else if(this.phase==='lower'){
+    // The rotor stays over the debris; ONLY the cable and net descend.
+    const target=heli.root.position.y-1.55;
+    setHelicopterWinch(heli,lerp(4,target,smooth(this.elapsed/2.4)));
+    if(this.elapsed>=2.4){
+     const chunks=detachRecoveryDebris(w,site);
+     beginCargoPickup(heli,chunks);
+     this.phase='collect';this.elapsed=0;
+    }
+   }else if(this.phase==='collect'){
+    // Reuse each actual broken slab/fragment mesh and drag its real volume
+    // into the net. No placeholder solid cube / instant invisible deletion.
+    animateCargoPickup(heli,this.elapsed/2.9);
+    if(this.elapsed>=2.9){
+     this.phase='lift';this.elapsed=0;
+    }
+   }else if(this.phase==='lift'){
+    setHelicopterWinch(heli,lerp(heli.root.position.y-1.55,7.8,smooth(this.elapsed/3)));
+    if(this.elapsed>=3){
      this.phase='haul';this.elapsed=0;
     }
-   }
-   if(this.phase==='haul'){
-    heli.root.position.y=50+4*Math.sin(Math.min(1,this.elapsed/1.4)*Math.PI/2);
-    // The helicopter visibly lifts its suspended load before heading toward
-    // the next property; no instant teleport or mesh shrink animation.
-    if(this.elapsed>1.4){heli.cargo.setEnabled(false);this.finishStage()}
+   }else if(this.phase==='haul'){
+    // It leaves the district CARRYING the original visible debris before
+    // unloading outside the island, then returns for another building.
+    const depot={x:-CITY_HALF_SIZE-26,z:site.hoverZ??site.z,y:this.hoverY+9};
+    const reached=travel(heli.root,depot,dt,34);
+    if(reached&&Math.abs(heli.root.position.y-depot.y)<1.5){
+     this.removed+=dumpCargo(heli);this.visited.add(site.key);
+     this.finishStage();
+    }
    }
    return true;
   }
@@ -314,8 +509,6 @@ export class RecoveryConvoy{
     this.pourStream.material=concrete;this.pourStream.isPickable=false;
    }
    if(this.phase==='pour'){
-    // The concrete disk grows radially while the truck's mixer rotates.
-    // It lies just below road paint/asphalt when road skins are restored.
     this.pourPatch?.scaling.setAll(Math.max(.03,Math.min(1,this.elapsed/3.2)));
     if(Math.random()<dt*4)w.createBurst?.(V(site.x,.2,site.z),'dust',4,.22);
     if(this.elapsed>3.2){
@@ -326,18 +519,24 @@ export class RecoveryConvoy{
    return true;
   }
   if(this.stage==='build'){
-   const site=this.site,pos=staging(site);
-   const reachedCrane=travel(this.crane.root,pos,dt,17);
-   const reachedTruck=travel(this.truck.root,{x:pos.x-6,z:pos.z+5,y:.8},dt,17);
-   if(reachedCrane&&reachedTruck&&this.phase==='arrive'){
-    this.phase='construct';this.elapsed=0;this.floorIndex=0;
-   }
-   if(this.phase==='construct'){
+   const crane=this.crane,site=this.site;
+   if(this.phase==='arrive'){
+    const erect=smooth(this.elapsed/5);
+    crane.tower.scaling.y=Math.max(.01,erect);
+    crane.jib.position.y=crane.mastHeight*erect+.55;
+    const arrive=travel(this.truck.root,
+      {x:site.x+8,z:site.z-9,y:.8},dt,20);
+    if(arrive&&this.elapsed>=5){
+     this.phase='construct';this.elapsed=0;this.floorIndex=0;
+     crane.pallet.setEnabled(true);
+    }
+   }else if(this.phase==='construct'){
     const b=site.building,floor=b.floors.find(e=>e.active||e.health<e.maxHealth);
-    if(!floor){this.completed++;this.finishStage();return true}
-    // Distinct prefabricated sections rise from the supply truck.
-    this.crane.pallet.setEnabled(true);
-    if(this.elapsed>1.25){
+    if(!floor){
+     this.completed++;attractNewResidents(w,w.mobile?2:4);this.finishStage();return true;
+    }
+    updateTowerLift(crane,b,this.elapsed);
+    if(this.elapsed>=3.2){
      if(restoreBuildingFloor(w,b,floor))this.progression.rebuilt++;
      this.floorIndex++;this.elapsed=0;
      if(!anyDamage(b)){

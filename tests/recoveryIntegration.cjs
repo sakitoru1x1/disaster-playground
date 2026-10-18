@@ -21,15 +21,29 @@ const {chromium}=require('playwright');
    const crater=d.makeCraterForTest(0,0,.45);
    d.makeCraterForTest(104,-104,.42);
    let stats=d.getState(),changes=new Set(),sightings=new Set(),result;
+   const visual={payloadSeen:false,realMeshesAttached:false,hoveredOverRubble:false,
+     minCargoY:Infinity,maxCargoY:-Infinity,craneRaised:false,towerHeight:0,jibLength:0,craneStyle:null};
    if(!impact.topFloorActive)throw new Error('Test impact did not break a floor');
    if(stats.craters!==2||stats.broken<2)throw new Error('Two craters and wrecks did not form');
    for(let i=0;i<400;i++){
     result=d.tickRecoveryForTest(2);
     changes.add(result.recovery.stage+':'+result.recovery.phase);
     if(result.recovery.fleetVisible)sightings.add(result.recovery.stage);
+    const h=result.recovery;
+    if(h.cargoPieces>0){
+     visual.payloadSeen=true;visual.realMeshesAttached ||= h.carriedRealRubble;
+     visual.minCargoY=Math.min(visual.minCargoY,h.firstCargoY);
+     visual.maxCargoY=Math.max(visual.maxCargoY,h.firstCargoY);
+    }
+    if(h.stage==='sweep'&&['lower','collect','lift'].includes(h.phase))
+     visual.hoveredOverRubble ||= h.hoverOverTarget;
+    if(h.stage==='build'&&h.phase==='construct')visual.craneRaised ||= h.craneMastRaised>.98;
+    visual.towerHeight=h.towerHeight||visual.towerHeight;
+    visual.jibLength=h.jibLength||visual.jibLength;
+    visual.craneStyle=h.craneStyle||visual.craneStyle;
     if(result.recovery.stage==='complete')break;
    }
-   return {impact,impact2,crater,after:result,stages:[...changes],vehicles:[...sightings],
+   return {impact,impact2,crater,visual,after:result,stages:[...changes],vehicles:[...sightings],
     integrity:d.getState().integrity,before:stats.broken};
   });
   console.log('RECOVERY_E2E',JSON.stringify(output));
@@ -38,10 +52,17 @@ const {chromium}=require('playwright');
   if(!output.stages.some(p=>p.startsWith('build:construct')))throw new Error('No crane building');
   if(output.after.craters!==0||output.after.broken!==0)throw new Error('After repair, craters or broken floors remain');
   if(output.after.recovery.stage!=='complete')throw new Error('Recovery convoy stalled');
+  if(!output.visual.payloadSeen||!output.visual.realMeshesAttached||!output.visual.hoveredOverRubble)
+   throw new Error('Helicopter did not suspend REAL rubble over its wreckage');
+  if(output.visual.maxCargoY-output.visual.minCargoY<3)
+   throw new Error('Captured rubble never lifted visibly while the winch retracted');
+  if(!output.visual.craneRaised||output.visual.towerHeight<50||
+     output.visual.jibLength<40||output.visual.craneStyle!=='lattice tower crane')
+   throw new Error('Large fixed lattice tower crane was not erected');
   if(output.after.recovery.buildingsRestored<2||output.after.recovery.cratersFilled!==2)
    throw new Error('Cleanup/construction did not iterate over multiple buildings and craters');
   if(errors.length)throw new Error('JS errors: '+errors.join('; '));
-  console.log('RECOVERY_E2E_PASS: helicopter, concrete mixer, mobile crane, materials truck, reconstructed foundation');
+  console.log('RECOVERY_E2E_PASS: helicopter transports real rubble, concrete mixer, 54m lattice tower crane, materials truck, restored city');
  }catch(e){console.error('RECOVERY_E2E_FAIL',String(e),JSON.stringify(errors));process.exitCode=1}
  finally{await browser.close();await server.close()}
 })().then(()=>process.exit(process.exitCode||0)).catch(e=>{console.error(e);process.exit(1)});

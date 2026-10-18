@@ -5,11 +5,16 @@ seconds with an animated, ordered recovery service. Each new disaster restarts
 the cleanup planning.
 
 ## 1 — Heavy-lift helicopter
-When the impact waves have stopped, the bright yellow helicopter arrives from
-offshore and hovers over the most heavily damaged property. Its cargo net is
-lowered and the wreckage of **one entire building lot** is removed in one pass.
-The helicopter then raises the loaded net and moves to the next wreck.
-The system also searches for stray road/park debris after the ruined buildings.
+When the impact waves have stopped, the bright yellow helicopter flies from
+offshore and hovers **over the actual centroid of the ruins**, avoiding the
+highest still-standing floors. The helicopter lowers a cable and open safety
+net to rubble level. The original broken concrete and other debris meshes
+remain visible and are physically lifted into the net, then climb back with
+the winch. The loaded helicopter flies across town and off the island, only
+unloading when it reaches its offshore dumping area. It returns for the next
+house and searches the streets for leftover rubble after ruined properties.
+There is no substitute cargo cube or instant deletion when the helicopter
+arrives; payload is carried by the real former debris geometry.
 
 Cleanup includes dynamic Havok fragments, settled rubble, baked rubble groups,
 visual falling pieces, and dynamic impact debris. Physics aggregates and
@@ -27,11 +32,14 @@ collision mesh is rebuilt. Subsequent meteors destroy overlapping concrete
 patches to prevent the old floating-road bug.
 
 ## 3 — Truck + mobile crane
-Once the last crater is filled, a mobile crane and materials truck approach
-each damaged building. Floor prefabs are lifted and genuine original structural
-floor meshes and Havok static bodies are restored **bottom-to-top**, one floor
-at a time. Health, fracture state and damage decals reset. The next building
-starts only when the previous is complete.
+Once the last crater is filled, a flatbed materials truck approaches a building
+while a **54-metre stationary lattice tower crane** visibly erects beside the
+site. Its 47-metre horizontal braced jib, counterweights, operator cab,
+slewing platform, moving trolley, winding steel hoist cable, hook and
+suspended concrete pallet actively position precast floor elements over
+the damaged structure. Genuine original structural meshes and Havok static
+bodies are restored **bottom-to-top**, one floor at a time. The tower crane
+is repositioned and reassembled at the next lot after each building.
 
 Reconstructed buildings attract new residents if the city lost people in the
 disaster. These have new identities; deceased NPCs are not resurrected.
@@ -53,8 +61,10 @@ disaster. These have new identities; deceased NPCs are not resurrected.
 - `node tests/returningResidents.test.mjs`: new arrivals, capacity caps,
   deceased citizen replacement without identity resurrection.
 - `node tests/recoveryIntegration.cjs`: Chrome + Havok end-to-end: break
-  a real building, create crater, fly helicopter, pour concrete, animate
-  crane/truck, rebuild floors, assert zero craters and full integrity.
+  two different buildings and make two craters. Assert helicopter hovers
+  directly over rubble, captures actual debris meshes and lifts them,
+  the 54-metre lattice tower crane fully erects and operates its 47-metre
+  jib/trolley, and the mixer/truck rebuild everything to full integrity.
 - Existing survival, city, district, terrain, citizens, earthquakes and
   browser mobile/desktop smoke suites remain mandatory.
 
