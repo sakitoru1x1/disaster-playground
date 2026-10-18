@@ -383,8 +383,8 @@ export class RecoveryConvoy{
     craneStyle:this.crane?'lattice tower crane':null};
  }
  start(stage,site){
-  const w=this.world;
   this.stage=stage;this.site=site;this.phase='arrive';this.elapsed=0;
+  this.world.audio?.play('select',site,.3);
   this.initFleet();this.park();
   const agent=stage==='sweep'?this.heli:stage==='fill'?this.mixer:this.crane;
   agent.root.setEnabled(true);
@@ -400,10 +400,8 @@ export class RecoveryConvoy{
    if(this.sweepRuns++===0)this.heli.root.position.set(-CITY_HALF_SIZE-23,this.hoverY+12,site.z);
    this.heli.sling.setEnabled(false);
    setHelicopterWinch(this.heli,4);
-   w.audio?.play('rotorStart',{x:site.x,y:this.hoverY,z:site.z},.9);
   }else if(stage==='fill'){
    agent.root.position.set(-CITY_HALF_SIZE-17,.8,staging(site).z);
-   w.audio?.play('heavyBrake',site,.55);
   }else{
    // The stationary tower crane rises IN PLACE next to the construction
    // plot. The only arriving vehicle is the materials delivery truck.
@@ -414,7 +412,6 @@ export class RecoveryConvoy{
      site.z-agent.root.position.z);
    agent.pallet.setEnabled(false);
    this.truck.root.position.set(-CITY_HALF_SIZE-23,.8,staging(site).z+5);
-   w.audio?.play('craneLift',site,.8);
   }
  }
  finishStage(){
@@ -461,7 +458,6 @@ export class RecoveryConvoy{
     const near=travel(heli.root,{x:site.hoverX??site.x,z:site.hoverZ??site.z,y:this.hoverY},dt,33);
     if(near&&Math.abs(heli.root.position.y-this.hoverY)<.8){
      this.phase='lower';this.elapsed=0;heli.sling.setEnabled(true);
-     w.audio?.play('winch',site,1);
     }
    }else if(this.phase==='lower'){
     // The rotor stays over the debris; ONLY the cable and net descend.
@@ -470,7 +466,7 @@ export class RecoveryConvoy{
     if(this.elapsed>=2.4){
      const chunks=detachRecoveryDebris(w,site);
      beginCargoPickup(heli,chunks);
-     w.audio?.play('cargoClink',site,.8);
+     w.audio?.play('load',site,.9);
      this.phase='collect';this.elapsed=0;
     }
    }else if(this.phase==='collect'){
@@ -479,7 +475,7 @@ export class RecoveryConvoy{
     animateCargoPickup(heli,this.elapsed/2.9);
     if(this.elapsed>=2.9){
      this.phase='lift';this.elapsed=0;
-     w.audio?.play('cargoLift',site,1);
+     w.audio?.play('winch',site,.8);
     }
    }else if(this.phase==='lift'){
     setHelicopterWinch(heli,lerp(heli.root.position.y-1.55,7.8,smooth(this.elapsed/3)));
@@ -493,7 +489,6 @@ export class RecoveryConvoy{
     const reached=travel(heli.root,depot,dt,34);
     if(reached&&Math.abs(heli.root.position.y-depot.y)<1.5){
      this.removed+=dumpCargo(heli);this.visited.add(site.key);
-     w.audio?.play('metal',heli.root.position,.64);
      this.finishStage();
     }
    }
@@ -504,7 +499,7 @@ export class RecoveryConvoy{
    const reached=travel(mixer.root,staging(site),dt,19);
    if(reached&&this.phase==='arrive'){
     this.phase='pour';this.elapsed=0;
-    w.audio?.play('concrete',site,1);
+    w.audio?.play('pour',site,.7);
     const concrete=w.mat('fresh poured concrete','#979f9e',{alpha:.82});
     const patch=MeshBuilder.CreateDisc('CEMENT MIXER CONCRETE FILL',
       {radius:Math.max(2.2,site.crater.radius*.86),tessellation:40},w.scene);
@@ -522,7 +517,6 @@ export class RecoveryConvoy{
     if(Math.random()<dt*4)w.createBurst?.(V(site.x,.2,site.z),'dust',4,.22);
     if(this.elapsed>3.2){
      if(fillCrater(w,site.crater))this.filled++;
-     w.audio?.play('buildComplete',site,.53);
      this.finishStage();
     }
    }
@@ -539,22 +533,19 @@ export class RecoveryConvoy{
     if(arrive&&this.elapsed>=5){
      this.phase='construct';this.elapsed=0;this.floorIndex=0;
      crane.pallet.setEnabled(true);
-     w.audio?.play('craneLift',site,.9);
     }
    }else if(this.phase==='construct'){
     const b=site.building,floor=b.floors.find(e=>e.active||e.health<e.maxHealth);
     if(!floor){
-     this.completed++;attractNewResidents(w,w.mobile?2:4);
-     w.audio?.play('buildComplete',site,1);this.finishStage();return true;
+     this.completed++;attractNewResidents(w,w.mobile?2:4);this.finishStage();return true;
     }
     updateTowerLift(crane,b,this.elapsed);
     if(this.elapsed>=3.2){
      if(restoreBuildingFloor(w,b,floor))this.progression.rebuilt++;
-     w.audio?.play('buildFloor',floor.mesh.getAbsolutePosition(),1);
+     w.audio?.play('build',floor.mesh.getAbsolutePosition(),.7);
      this.floorIndex++;this.elapsed=0;
      if(!anyDamage(b)){
-      this.completed++;attractNewResidents(w,w.mobile?2:4);
-      w.audio?.play('buildComplete',site,1);this.finishStage();
+      this.completed++;attractNewResidents(w,w.mobile?2:4);this.finishStage();
      }
     }
    }

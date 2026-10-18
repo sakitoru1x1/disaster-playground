@@ -35,10 +35,7 @@ export class DisasterSystem{
     const strength=type==='meteor'?meteorPower(intensity):type==='tornado'?clamp(intensity,.15,1):severity(intensity);
     this.lastStrength=strength;
     this.world.impactCount++;
-    this.world.audio?.play(
-      type==='meteor'?'meteorFly':type==='quake'?'quake':
-      type==='tornado'?'tornadoStart':'tsunamiStart',p,strength);
-    this.world.audio?.play('panic',p,Math.max(.4,strength));
+    this.world.audio?.play(type,p,Math.max(.5,strength));
     switch(type){
       case 'meteor': this.meteor(p,strength);break;
       case 'tornado':this.tornado(p,strength);break;
@@ -51,8 +48,7 @@ export class DisasterSystem{
   }
   emitSound(kind='boom',power=1,position=null){
     if(!this.audioEnabled)return false;
-    const key=kind==='wind'?'tornadoStart':kind==='quake'?'quake':kind;
-    return this.world?.audio?.play(key,position,power);
+    return this.world.audio?.play(kind==='wind'?'meteor':kind,position,power);
   }
   material(name,color,alpha=.8,emissive=null){
     return this.world.mat(name,color,{alpha,emissive:emissive||color,backFaceCulling:false});

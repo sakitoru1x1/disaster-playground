@@ -41,7 +41,6 @@ export class CityProgression {
        state:'driving',heading:yaw,lastPosition:mesh.position.clone()}});
    this.emergencyVehicles++;
   }
-  world.audio?.play('warning',world.scene.activeCamera?.target||null,.75);
   // Emergency crews are independent NPCs: a level-10 quake may injure
   // every ordinary citizen, but aid must still arrive from outside the city.
   const existing=world.civilians.filter(p=>p.role==='medic'&&p.state!=='injured'&&p.state!=='dead');
@@ -104,7 +103,7 @@ export class CityProgression {
      nearest.root.position.y=.215;nearest.root.rotation.z=0;
      nearest.help?.setEnabled(false);
      nearest.treatment=0;this.rescued++;
-     world.audio?.play('heal',nearest.root.position,.9);
+     world.audio?.play('heal',nearest.root.position,.8);
      medic.medicalTarget=null;
     }
    }

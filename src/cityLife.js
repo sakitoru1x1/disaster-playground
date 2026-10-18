@@ -110,7 +110,7 @@ export function attractNewResidents(world,count=3){
 
 function injureCivilian(world,p){
   if(p.state==='dead'||p.state==='injured')return;
-  world.audio?.play('hurt',p.root.position,.57);
+  world.audio?.play('hurt',p.root.position,.5);
   p.state='injured';p.panic=0;p.medicalTarget=null;p.exposure=0;
   p.help?.setEnabled(true);
   p.root.rotation.z=-.44;
@@ -118,7 +118,6 @@ function injureCivilian(world,p){
 }
 function killCivilian(world,p){
   if(p.state==='dead')return;
-  world.audio?.play('panic',p.root.position,.65);
   p.state='dead';p.panic=0;world.civilianDeaths++;
   p.help?.setEnabled(false);
   p.root.rotation.z=rand(-1.44,-1.13);
@@ -154,8 +153,7 @@ function damageCar(world,car,power,direction){
   car.damage=(car.damage||0)+power;
   if(car.damage<1.1)return;
   releaseTrafficCar(car);
-  car.wrecked=true;world.carsWrecked++;
-  world.audio?.play('carCrash',car.mesh.position,1);
+  car.wrecked=true;world.carsWrecked++;world.audio?.play('carCrash',car.mesh.position,1);
   const child=car.mesh.getChildMeshes().find(mesh=>mesh.name==='vehicle windows');
   if(child){child.scaling.y*=.48;child.rotation.z=rand(-.26,.26);child.material=world.materials.wreck}
   const hood=MeshBuilder.CreateBox('crushed vehicle hood',
@@ -364,9 +362,7 @@ export function updateTraffic(world,dt){
       releaseTrafficCar(car);
       continue;
     }
-    if(blockedByAnotherCar(world,car,destination)){
-      world.audio?.play('carHorn',car.mesh.position,.25);continue;
-    }
+    if(blockedByAnotherCar(world,car,destination))continue;
     t.distance=actualDist;
     t.heading=trafficHeading(t.route,t.distance);
     const q=Quaternion.FromEulerAngles(0,t.heading,0);
@@ -392,7 +388,6 @@ export function updateCityLife(world,dt){
         p.socialUntil=other.socialUntil=world.time+2.5;
         p.lastGreeting=other.lastGreeting=world.time;
         p.routineActivity=other.routineActivity='socializing';
-        world.audio?.play('voice',p.root.position,.32,{rate:.85+Math.random()*.3});
         cells.delete(key);
       }else cells.set(key,p);
     }

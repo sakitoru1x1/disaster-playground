@@ -1,0 +1,224 @@
+{
+  "footstep_1.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_footstep_01.ogg"
+  },
+  "footstep_2.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_footstep_02.ogg"
+  },
+  "footstep_wet.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_footstep_wet_01.ogg"
+  },
+  "glass_1.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_glass_01.ogg"
+  },
+  "glass_2.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_glass_04.ogg"
+  },
+  "concrete_1.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_stones_01.ogg"
+  },
+  "concrete_2.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_stones_03.ogg"
+  },
+  "impact_1.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_hit_01.ogg"
+  },
+  "impact_2.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_hit_03.ogg"
+  },
+  "steel_1.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_metal_hit_01.ogg"
+  },
+  "steel_2.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_metal_hit_02.ogg"
+  },
+  "rubble_1.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_metal_01.ogg"
+  },
+  "rubble_2.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_metal_06.ogg"
+  },
+  "ui_click.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_switch_01.ogg"
+  },
+  "ui_select.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_switch_02.ogg"
+  },
+  "wind_rush.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_air_01.ogg"
+  },
+  "wind_short.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_air_02.ogg"
+  },
+  "thunder.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_thunder_01.ogg"
+  },
+  "city_ambient.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_loop_highway.ogg"
+  },
+  "construction_ambient.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_loop_construction_site.ogg"
+  },
+  "machinery_1.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_loop_machine_01.ogg"
+  },
+  "machinery_2.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_loop_machine_03.ogg"
+  },
+  "water_ambient.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_loop_water_01.ogg"
+  },
+  "urban_ambient.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_loop_ambient_03.ogg"
+  },
+  "creak_1.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_wood_01.ogg"
+  },
+  "crash_1.ogg": {
+    "artist": "rubberduck",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/100-cc0-sfx-2",
+    "original": "sfx100v2_wood_hit_01.ogg"
+  },
+  "helicopter_flyby.ogg": {
+    "artist": "WuxiaScrub",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/helicopter-sfx",
+    "original": "helicopter.ogg"
+  },
+  "helicopter_rotor.ogg": {
+    "artist": "Mish7913",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/propeller-cartoon-loop",
+    "original": "propeller.ogg"
+  },
+  "car_idle.wav": {
+    "artist": "domasx2",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/racing-car-engine-sound-loops",
+    "original": "car_idle.wav"
+  },
+  "car_driving.wav": {
+    "artist": "domasx2",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/racing-car-engine-sound-loops",
+    "original": "car_drive.wav"
+  },
+  "calm_music.mp3": {
+    "artist": "wipics",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/calm-loop",
+    "original": "calm_music.mp3"
+  },
+  "danger_music.ogg": {
+    "artist": "congusbongus",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/project-utopia-seamless-loop",
+    "original": "utopia_music.ogg"
+  },
+  "boom_big.ogg": {
+    "artist": "elnineo",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/explosion-tilesets",
+    "original": "Big_Explosion.ogg"
+  },
+  "boom_small.ogg": {
+    "artist": "EZduzziteh",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/explosions-4",
+    "original": "explosion1.ogg"
+  },
+  "boom_sharp.ogg": {
+    "artist": "EZduzziteh",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/explosions-4",
+    "original": "explosion3.ogg"
+  },
+  "tornado_wind.ogg": {
+    "artist": "SketchMan3",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/wind-whoosh-loop",
+    "original": "wind_woosh_loop.ogg"
+  },
+  "ambulance_siren.wav": {
+    "artist": "TinyWorlds",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/storm-siren",
+    "original": "storm_3_siren.ogg (9 s excerpt, resampled 16 kHz mono)"
+  }
+}

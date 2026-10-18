@@ -30,7 +30,7 @@
   }
   .top-actions .icon-action span{display:none}
   .top-actions .icon-action.round{height:38px;width:38px;min-width:38px;font-size:17px}
-  .top-actions #soundBtn{display:none}
+  .top-actions #soundBtn{display:grid}
   .mobile-menu-toggle{display:grid!important;color:#f5bd7b!important}
   .mobile-drawer-backdrop{
     position:absolute;inset:var(--mobile-header) 0 var(--mobile-footer);
@@ -152,6 +152,7 @@
   .brand-name{font-size:10px}
   .brand-icon{display:none}
   .top-actions{gap:3px}
+  .top-actions #helpBtn{display:none}
   .bottom-controls button{min-width:58px;padding:5px}
   .mobile-tool small{font-size:6px}
 }
