@@ -5,6 +5,7 @@ import {
 import HavokPhysics from '@babylonjs/havok';
 import {CityWorld} from './world.js';
 import {DisasterSystem} from './disasters.js';
+import {AudioPass} from './audioPass.js';
 import {WalkController} from './walkController.js';
 import {pauseCityTraffic,cityClock,citizenStats} from './cityLife.js';
 import {CITY_HALF_SIZE} from './cityLayout.js';
@@ -16,6 +17,7 @@ import './mobile.css';
 import './walk.css';
 import './playerSurvival.css';
 import './survivorHelp.css';
+import './audio.css';
 
 const $=selector=>document.querySelector(selector);
 const $$=selector=>[...document.querySelectorAll(selector)];
@@ -37,6 +39,7 @@ $('#housesCount').value=String(buildingCount);
 let simTime=0,lastTick=performance.now(),fpsTimer=0;
 let rebuilding=false,soundsOn=true,qualityHigh=false,cinematic=false;
 let physicsViewer=null;
+const audio=new AudioPass({mobile:mobileDevice});
 let pointerStart=null,targetPoint=null,hovered=false;
 let cameraAngles=[[-Math.PI*.67,1.05,320],[-Math.PI*.52,.66,240],[-Math.PI*.15,1.24,150]];
 let cameraIndex=0;
@@ -64,6 +67,7 @@ function logEvent(title,detail){
 }
 function setStatus(text,sub='Ready to deploy'){$('#statusText').textContent=text;$('#statusSub').textContent=sub;}
 function selectTool(type){
+  if(selected!==type)audio.play('uiSelect',null,.6);
   selected=type;
   $$('.mobile-tool').forEach(el=>{
     const active=el.dataset.mobileTool===type;
@@ -140,6 +144,7 @@ function callbacks(){
   return {
     onDeploy:(kind,p,strength)=>{
       world?.progression?.event(kind);
+      audio.play('warning',p,Math.max(.5,strength));
       logEvent(labels[kind],Math.round(strength*100)+'% intensity | '+Math.round(p.x)+', '+Math.round(p.z));
       toast(icons[kind]+' '+labels[kind],descriptions[kind]);
       setStatus(labels[kind]+' DEPLOYED','Real-time physics simulation in progress');
@@ -189,9 +194,11 @@ function updateCursor(e){
 function deployAt(p=targetPoint){
   if(rebuilding||!disasters||!p)return;
   if(paused){togglePause();toast('SIMULATION RESUMED')}
+  audio.play('uiConfirm',null,.34);
   disasters.deploy(selected,p,power);
 }
 function togglePause(){
+  audio.play('uiClick',null,.5);
   paused=!paused;
   if(world)pauseCityTraffic(world,paused);
   // Babylon continues rendering; its physics integration is paused by scaling timestep.
@@ -201,6 +208,7 @@ function togglePause(){
   logEvent(paused?'Simulation paused':'Simulation running',paused?'Rigid bodies frozen':'Simulation resumed');
 }
 function cycleSpeed(){
+  audio.play('uiSelect',null,.4);
   const options=[.5,1,1.5],i=options.indexOf(speed);
   speed=options[(i+1)%options.length];
   $('#speedBtn').textContent=speed+'× SPEED';
@@ -209,6 +217,7 @@ function cycleSpeed(){
 }
 function toggleWalkMode(){
   if(!walk||rebuilding)return;
+  audio.play('uiClick',null,.5);
   walk.setEnabled(!walk.enabled);
   const active=walk.enabled;
   $('#walkDeath').classList.toggle('is-visible',active&&walk.survival.dead);
@@ -246,15 +255,18 @@ function walkStrike(){if(walk?.enabled&&!walk.survival.dead)deployAt(walkTarget(
 function walkHelp(){
   if(!walk?.enabled||walk.survival.dead)return;
   const helped=world?.progression?.helpNearest(walk.camera.position);
+  audio.play(helped?'heal':'uiClick',walk.camera.position,helped?1:.45);
   toast(helped?'SURVIVOR RESCUED':'NO INJURED PERSON NEARBY',helped?'Good work!':'Get within 3 metres of an injured citizen');
 }
 function respawnPlayer(){
   if(!walk?.enabled)return;
   walk.respawn();
+  audio.play('respawn',walk.camera.position,1);
   $('#walkDeath').classList.remove('is-visible');
   toast('RESPAWNED','Health restored to 100%');
 }
 function cycleCamera(){
+  audio.play('uiSelect',null,.45);
   if(walk?.enabled){toggleWalkMode();return}
   cameraIndex=(cameraIndex+1)%cameraAngles.length;
   const [a,b,r]=cameraAngles[cameraIndex];
@@ -298,6 +310,7 @@ function applyQuality(){
     'Toggle quality';
 }
 function switchQuality(){
+  audio.play('uiSelect',null,.4);
   qualityHigh=!qualityHigh;
   if(mobileDevice)mobileResolutionFactor=1.0;
   applyQuality();
@@ -322,6 +335,8 @@ function surprise(){
   deployAt(p);
 }
 async function createGame(){
+  if(scene)audio.play('uiReset',null,.70);
+  audio.resetScene();
   rebuilding=true;
   $('#loading').classList.remove('is-done');
   $('#loadingText').textContent='INITIALIZING PHYSICS ENGINE...';
@@ -345,6 +360,7 @@ async function createGame(){
   scene.getPhysicsEngine().setTimeStep(1/60);
   $('#loadingText').textContent='CONSTRUCTING SIMULATED CITY...';
   world=new CityWorld(scene,camera,buildingCount,{mobile:mobileDevice});
+  audio.bindWorld(world);
   walk=new WalkController(scene,canvas,camera,world,mobileDevice);
   walk.survival.onDeath=cause=>{
     $('#walkDeathCause').textContent='CAUSE: '+cause.toUpperCase();
@@ -369,7 +385,7 @@ async function createGame(){
     }
   }catch(e){console.warn('Post-processing fallback',e)}
   disasters=new DisasterSystem(world,callbacks());
-  disasters.audioEnabled=soundsOn;
+  disasters.audioEnabled=soundsOn;audio.setEnabled(soundsOn);
   applyQuality();
   simTime=0;paused=false;speed=1;fpsTimer=0;
   $('#pauseIcon').textContent='Ⅱ';$('#pauseBtn').lastChild.textContent=' PAUSE';
@@ -381,6 +397,8 @@ async function createGame(){
   rebuilding=false;
   setTimeout(()=>$('#loading').classList.add('is-done'),330);
   window.disasterDebug={
+    getAudio:()=>audio.getState(),
+    playAudioForTest:(kind)=>audio.play(kind,walk?.camera?.position||null,1,{force:true}),
     getPerf:()=>({fps:engine.getFps(),drawCalls:engine._drawCalls?.current??null,meshes:scene.meshes.length,activeMeshes:scene.getActiveMeshes().length,activeIndices:scene.getActiveIndices(),hardwareScale:engine.getHardwareScalingLevel(),width:engine.getRenderWidth(),height:engine.getRenderHeight(),shadows:world.shadow.getShadowMap()?.getSize()?.width||0,batching:world.staticBatchStats,mobile:mobileDevice,quality:mobileDevice?(qualityHigh?'SHARP':'MOBILE'):(qualityHigh?'ULTRA':'PERF')}),
     getState:()=>({terrainDeformations:world.terrainDeformations,craters:world.terrainCraters.length,
       ...world.progression.stats(),fps:engine.getFps(),buildings:world.buildings.length,requestedBuildings:buildingCount,floors:world.totalFloors,broken:world.brokenFloors,
@@ -639,11 +657,24 @@ function bindUI(){
   $('#fullscreenBtn').addEventListener('click',toggleFullscreen);
   document.addEventListener('fullscreenchange',syncFullscreenUI);
   document.addEventListener('webkitfullscreenchange',syncFullscreenUI);
-  $('#soundBtn').addEventListener('click',()=>{
+  function toggleSound(){
     soundsOn=!soundsOn;if(disasters)disasters.audioEnabled=soundsOn;
+    audio.setEnabled(soundsOn);if(soundsOn)audio.unlock();
     $('#soundBtn span').textContent=soundsOn?'SOUND ON':'MUTED';
+    $('#mixerMuteBtn').textContent=soundsOn?'🔊 AUDIO ON':'🔇 AUDIO OFF';
     toast(soundsOn?'SOUND ENABLED':'SOUND MUTED');
+  }
+  $('#soundBtn').addEventListener('click',toggleSound);
+  $('#mixerMuteBtn').addEventListener('click',toggleSound);
+  $('#mixBtn').addEventListener('click',()=>{
+    audio.play('uiSelect',null,.4);
+    $('#audioControls').classList.toggle('hidden');
+    $('#mixBtn').setAttribute('aria-expanded',String(!$('#audioControls').classList.contains('hidden')));
   });
+  for(const [input,method] of [['mixMusic','setMusicVolume'],
+    ['mixEffects','setEffectsVolume'],['mixAmbience','setAmbienceVolume']]){
+    $('#'+input).addEventListener('input',e=>audio[method](Number(e.target.value)/100));
+  }
   $('#helpBtn').addEventListener('click',()=>$('#helpModal').classList.remove('hidden'));
   $('#closeHelp').addEventListener('click',()=>$('#helpModal').classList.add('hidden'));
   $('#helpModal').addEventListener('click',e=>{if(e.target.id==='helpModal')e.target.classList.add('hidden')});
@@ -694,7 +725,11 @@ function bindUI(){
   syncFullscreenUI();
 }
 bindUI();
-window.addEventListener('pagehide',()=>DisasterSystem.closeSharedAudio());
+// AudioContext must be initialized from a trusted click/key press on Safari,
+// Chrome Android and desktop. Never attempt to autoplay the music score.
+window.addEventListener('pointerdown',()=>audio.unlock(),{passive:true,capture:true});
+window.addEventListener('keydown',()=>audio.unlock(),{capture:true});
+window.addEventListener('pagehide',()=>{audio.dispose();DisasterSystem.closeSharedAudio()});
 engine.runRenderLoop(()=>{
   if(!scene)return;
   const dt=Math.min(engine.getDeltaTime()/1000,.065);
@@ -706,6 +741,7 @@ engine.runRenderLoop(()=>{
     world?.update(scaled);
     world?.progression.update(scaled,disasters);
     walk?.update(scaled,disasters);
+    audio.update({world,disasters,walk,paused:false,dt:scaled});
     if(disasters?.shake>0&&camera){
       // Non-destructive screen-shake offsets target temporarily.
       const s=disasters.shake;
@@ -718,6 +754,7 @@ engine.runRenderLoop(()=>{
     }
     updateStats(dt);
   }
+  if(paused)audio.update({world,disasters,walk,paused:true,dt});
   scene.render();
 });
 (async()=>{

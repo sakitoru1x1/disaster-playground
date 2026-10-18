@@ -77,6 +77,7 @@ export class PlayerSurvival {
   }
   takeDamage(amount,cause='impact',knock=0){
     if(this.dead||amount<=0)return;
+    this.world?.audio?.play('hurt',this.mesh?.position||this.camera.position,Math.min(1.3,amount/16));
     this.health=clamp(this.health-amount,0,100);
     this.events++;
     this.lastHurt=cause;
@@ -84,6 +85,7 @@ export class PlayerSurvival {
     this.cooldown=Math.max(this.cooldown,.15);
     this.knockdown=Math.max(this.knockdown,knock);
     if(this.health===0){
+      this.world?.audio?.play('death',this.mesh?.position||this.camera.position,1);
       this.dead=true;
       this.knockdown=10;
       this.body?.setLinearVelocity(V(0,0,0));

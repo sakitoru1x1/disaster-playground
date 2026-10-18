@@ -455,6 +455,7 @@ export class CityWorld {
     // Distant district buildings retain their single cheap static collider
     // while only being scratched. Activate floor-by-floor Havok physics only
     // when a storey actually needs to fracture in release().
+    this.audio?.play('crack',impactAt||entry.mesh.position,Math.min(1.3,amount/60));
     entry.health=Math.max(0,entry.health-amount);
     entry.damageTaken+=amount;
     const ratio=entry.health/entry.maxHealth;
@@ -514,6 +515,8 @@ export class CityWorld {
     }
     if(entry.building?.district)activateDistrictBuilding(this,entry.building);
     if(!fractureStorey(this,entry,impulse,impactAt))return false;
+    this.audio?.play('collapse',impactAt||entry.mesh.position,.65+entry.size.x/18);
+    this.audio?.play('glass',impactAt||entry.mesh.position,.35);
     this.fracturesThisFrame++;
     // Removing ANY structural storey removes support for the entire stack above it.
     // Schedule the next intact upper floor, even if the destroyed floor was itself high.
@@ -808,6 +811,7 @@ export class CityWorld {
       item.mesh.position.addInPlace(item.velocity.scale(dt));
       item.mesh.rotation.addInPlace(item.angular.scale(dt));
       if(item.mesh.position.y<=item.floorY){
+        this.audio?.play('debrisLand',item.mesh.position,.55);
         item.mesh.position.y=item.floorY;
         if((item.kind==='slab'||item.kind==='wall')&&canVisuallyFracture(item)){
           if(splitVisualOnLanding(this,item)){
@@ -882,6 +886,7 @@ export class CityWorld {
       if(fragment.collisionObservable&&fragment.collisionObserver)fragment.collisionObservable.remove(fragment.collisionObserver);
       fragment.aggregate.dispose();
       fragment.aggregate=null;
+      this.audio?.play('debrisLand',fragment.mesh.position,.45);
       fragment.mesh.metadata.settled=true;
       this.rubble.push(fragment.mesh);
       this.fragments.splice(i,1);this.activeBodies=Math.max(0,this.activeBodies-1);

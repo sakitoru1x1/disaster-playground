@@ -35,6 +35,10 @@ export class DisasterSystem{
     const strength=type==='meteor'?meteorPower(intensity):type==='tornado'?clamp(intensity,.15,1):severity(intensity);
     this.lastStrength=strength;
     this.world.impactCount++;
+    this.world.audio?.play(
+      type==='meteor'?'meteorFly':type==='quake'?'quake':
+      type==='tornado'?'tornadoStart':'tsunamiStart',p,strength);
+    this.world.audio?.play('panic',p,Math.max(.4,strength));
     switch(type){
       case 'meteor': this.meteor(p,strength);break;
       case 'tornado':this.tornado(p,strength);break;
@@ -45,37 +49,10 @@ export class DisasterSystem{
     this.events.onDeploy?.(type,p,strength);
     return p;
   }
-  emitSound(kind='boom',power=1){
-    if(!this.audioEnabled)return;
-    try{
-      const Ctx=window.AudioContext||window.webkitAudioContext;
-      if(!Ctx)return;
-      if(!DisasterSystem.sharedAudio||DisasterSystem.sharedAudio.state==='closed')
-        DisasterSystem.sharedAudio=new Ctx();
-      this.audio=DisasterSystem.sharedAudio;
-      if(this.audio.state==='suspended')this.audio.resume().catch(()=>{});
-      const ctx=this.audio,t=ctx.currentTime;
-      const len=kind==='wind'?2.6:kind==='quake'?2.3:1.9;
-      const frames=Math.ceil(ctx.sampleRate*len),buf=ctx.createBuffer(1,frames,ctx.sampleRate);
-      const d=buf.getChannelData(0);
-      let random=0;
-      for(let i=0;i<frames;i++){
-        const time=i/ctx.sampleRate;
-        random=random*.87+(Math.random()*2-1)*.13;
-        const env=Math.pow(1-time/len,kind==='wind'?.7:1.8);
-        const rumble=Math.sin(time*(kind==='quake'?34:kind==='wind'?40:55)+Math.sin(time*9)*3);
-        d[i]=(random*.6+rumble*.22)*env;
-      }
-      const src=ctx.createBufferSource();src.buffer=buf;
-      const low=ctx.createBiquadFilter();low.type='lowpass';low.frequency.value=kind==='wind'?530:kind==='quake'?210:290;
-      const gain=ctx.createGain();gain.gain.value=0;
-      gain.gain.setValueAtTime(0,t);
-      gain.gain.linearRampToValueAtTime(.22*power*this.volume,t+.08);
-      gain.gain.exponentialRampToValueAtTime(.001,t+len);
-      src.connect(low);low.connect(gain);gain.connect(ctx.destination);
-      src.onended=()=>{src.disconnect();low.disconnect();gain.disconnect()};
-      src.start(t);src.stop(t+len);
-    }catch(e){console.warn('Audio unavailable',e)}
+  emitSound(kind='boom',power=1,position=null){
+    if(!this.audioEnabled)return false;
+    const key=kind==='wind'?'tornadoStart':kind==='quake'?'quake':kind;
+    return this.world?.audio?.play(key,position,power);
   }
   material(name,color,alpha=.8,emissive=null){
     return this.world.mat(name,color,{alpha,emissive:emissive||color,backFaceCulling:false});
@@ -201,7 +178,7 @@ export class DisasterSystem{
     this.effects.push({type:'flash',light,age:0,maxAge:.5});
     this.shake=Math.max(this.shake,2.3*m.strength);
     w.affectLife?.('meteor',p,m.strength,scale.radius,.2);
-    this.emitSound('boom',1.2*m.strength);
+    this.emitSound('boom',1.2*m.strength,p);
     this.events.onImpact?.(m.strength);
     m.system.stop();m.system.dispose();if(m.aggregate)m.aggregate.dispose();m.mesh.dispose();
   }

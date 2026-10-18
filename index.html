@@ -9,7 +9,15 @@
   <header class="topbar">
     <div class="brand"><div class="brand-icon"><span class="brand-cross">✳</span></div><div class="brand-copy"><div class="brand-overline">A PHYSICS EXPERIMENT</div><div class="brand-name">DISASTER<span class="brand-slash"> / </span>PLAYGROUND</div></div></div>
     <div class="top-center"><span class="live-dot"></span><span>LIVE SIMULATION</span><span class="top-separator"></span><span id="clock">00:00</span></div>
-    <div class="top-actions"><button id="mobileMenuBtn" class="icon-action mobile-menu-toggle" type="button" aria-label="Open disaster controls" aria-expanded="false" aria-controls="missionSidebar">☷ <span>CONTROLS</span></button><button id="cameraBtn" class="icon-action" title="Switch camera (C)">◉ <span>CAMERA</span></button><button id="walkBtn" class="icon-action" type="button" aria-pressed="false" title="Walk / orbit (V)">🚶 <span>WALK</span></button><button id="soundBtn" class="icon-action" title="Toggle sound">♫ <span>SOUND ON</span></button><button id="fullscreenBtn" class="icon-action mobile-fullscreen-toggle" type="button" aria-label="Enter fullscreen" aria-pressed="false" title="Fullscreen">⛶ <span>FULLSCREEN</span></button><button id="settingsBtn" class="icon-action" title="Toggle quality">⚙ <span>PERF</span></button><button id="helpBtn" class="icon-action round" title="Controls and help">?</button></div>
+    <div class="top-actions"><button id="mobileMenuBtn" class="icon-action mobile-menu-toggle" type="button" aria-label="Open disaster controls" aria-expanded="false" aria-controls="missionSidebar">☷ <span>CONTROLS</span></button><button id="cameraBtn" class="icon-action" title="Switch camera (C)">◉ <span>CAMERA</span></button><button id="walkBtn" class="icon-action" type="button" aria-pressed="false" title="Walk / orbit (V)">🚶 <span>WALK</span></button><button id="mixBtn" class="icon-action" type="button" aria-label="Open audio mixer" aria-expanded="false" aria-controls="audioControls" title="Music / effects / ambience">♫ <span>MIX</span></button><button id="soundBtn" class="icon-action" title="Toggle sound">♫ <span>SOUND ON</span></button><button id="fullscreenBtn" class="icon-action mobile-fullscreen-toggle" type="button" aria-label="Enter fullscreen" aria-pressed="false" title="Fullscreen">⛶ <span>FULLSCREEN</span></button><button id="settingsBtn" class="icon-action" title="Toggle quality">⚙ <span>PERF</span></button><button id="helpBtn" class="icon-action round" title="Controls and help">?</button></div>
+  <div id="audioControls" class="audio-controls hidden" role="group" aria-label="Audio mix">
+    <div class="audio-title">♫ CITY SOUNDSCAPE <span>LIVE AUDIO</span></div>
+    <button id="mixerMuteBtn" class="audio-mute" type="button">🔊 AUDIO ON</button>
+    <label>MUSIC <input id="mixMusic" type="range" min="0" max="100" value="100" aria-label="Music volume"></label>
+    <label>EFFECTS <input id="mixEffects" type="range" min="0" max="100" value="100" aria-label="Effects volume"></label>
+    <label>AMBIENCE <input id="mixAmbience" type="range" min="0" max="100" value="100" aria-label="Ambience volume"></label>
+    <small>Sound starts on your first tap. Spatial audio follows the camera.</small>
+  </div>
   </header>
   <div id="mobileDrawerBackdrop" class="mobile-drawer-backdrop" aria-hidden="true"></div>
   <aside class="sidebar" id="missionSidebar">

@@ -21,7 +21,9 @@
     "test:disasters": "node tests/disasterCoverage.test.mjs",
     "test:browser": "node tests/browserSmoke.cjs",
     "test:recovery": "node tests/cityRecovery.test.mjs && node tests/returningResidents.test.mjs",
-    "test:recovery:e2e": "node tests/recoveryIntegration.cjs"
+    "test:recovery:e2e": "node tests/recoveryIntegration.cjs",
+    "test:audio": "node tests/audioPass.test.mjs",
+    "test:audio:browser": "node tests/audioBrowser.cjs"
   },
   "dependencies": {
     "@babylonjs/core": "^9.31.0",
