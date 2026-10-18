@@ -1,16 +1,19 @@
 # Audio Pass / Living City Soundscape
 
 ## What you hear
-**Original adaptive background music:** a procedural cinematic urban score using
-sustained analog-style chords, bass, arpeggiated melody and darker synth timbres
-during disasters. Tracks are scheduled ahead on the WebAudio clock and adapt
-to structural damage/ongoing danger. Music continues quietly while paused.
+**Airy, restrained original score:** instead of continuously layered chords,
+bass and arpeggios, the soundtrack now gives each two-note chord six seconds
+of space. A melody enters only occasionally, with long quiet gaps. Severe
+destruction fades the music down so explosions stand out instead of competing.
+Music decays gently when paused.
 
-**Daily city:** traffic engine idles and revs (the four nearest vehicles on PC,
-two on mobile), congested horns, breeze, ocean surf, distant street crowds,
-daytime birdsong, and emergency vehicle sirens. Vehicle pitch varies with the
-actual traffic speed. Audio pans *relative to camera heading*; a car passing
-behind you no longer stays locked to a fixed stereo side.
+**Natural quiet:** a light distant city hum sits under the main action; birds
+chirp briefly with 8–19-second intervals, the ocean is heard mainly near the
+coast, and a crowd is only audible around living nearby residents. Regular
+wind is almost silent unless there's a storm. Only the closest **two cars
+on desktop / one on mobile** get individual engine loops; vehicle pitch reacts
+to traffic speed and engine sounds follow camera-relative stereo position.
+No constant stack of traffic, surf, birds, wind and crowd noise.
 
 **Destruction:** approaching meteors, impacts, blast rumble, tornado roar,
 earthquake tremors, tsunami surge, masonry cracks, glass-like shattering,
@@ -49,17 +52,23 @@ survivor rescue/respawn, game reset and sound control.
 
 ## Performance
 - Audio frame recalculates every ~110 ms, rather than per rendering frame.
-- One context, 14-16 continuously reusable sample loops, short cached sound
-  buffers, at most 13/22 concurrent one-shot voices (mobile/desktop).
+- One context. Loops are **created lazily** only when actually audible,
+  typically 3–5 active city sources instead of 14–16 prestarted layers.
+  Original loops now synthesize mainly pitched motor/rotor tones with little
+  filtered air noise (not broadband white noise), and use per-source gentle
+  low-pass filters. Individual samples are cached and reusable.
+- Dedicated **motor bus**, ambient bus, music bus and effects bus. Loud impacts
+  automatically duck the backgrounds and overlapping clattering sounds use
+  shared cooldowns. Maximum 7/11 concurrent one-shot voices (mobile/PC).
 - 3D proximity attenuation and scene listener are used in both orbit and
   street-level camera modes.
 - Audio synthesis is cheaper than decoding dozens of external sound files,
   but **real-device FPS and mix quality still require listening tests**.
 
 ## Tests
-- `npm run test:audio`: gain falloff, paused/muted mix, recovery stage mix,
-  simulated AudioContext graph, cache, music scheduler, voice budget and
-  scene reset without loop duplication.
+- `npm run test:audio`: low-noise synthesized PCM RMS, reduced idle mix,
+  spatial gain, shared impact-priority cooldowns, sparse loop allocation,
+  motor-bus isolation, music scheduling, mute/sliders and no reset leaks.
 - `npm run test:audio:browser`: starts Vite and uses Chrome on desktop and
   mobile layouts; confirms no autoplay, unlock on real click, notes/loops
   started, volume sliders, mute/unmute, sound effects, reset and no JS errors.

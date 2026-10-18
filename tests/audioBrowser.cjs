@@ -21,7 +21,7 @@ const {chromium,devices}=require('playwright');
    await page.locator('#mixBtn').click({timeout:20000});
    await page.waitForFunction(()=>window.disasterDebug.getAudio().unlocked,{timeout:15000});
    await page.waitForFunction(()=>window.disasterDebug.getAudio().musicNotes>=2&&
-      window.disasterDebug.getAudio().loops>=14,{timeout:30000});
+      window.disasterDebug.getAudio().loops>=2,{timeout:30000});
    const mixed=await page.evaluate(()=>{
     const x=document.getElementById('mixMusic');x.value='32';x.dispatchEvent(new Event('input',{bubbles:true}));
     const y=document.getElementById('mixEffects');y.value='50';y.dispatchEvent(new Event('input',{bubbles:true}));
@@ -30,6 +30,7 @@ const {chromium,devices}=require('playwright');
     window.disasterDebug.playAudioForTest('winch');
     return window.disasterDebug.getAudio();
    });
+   if(mixed.loops>8)throw Error('Background audio still runs too many loops');
    if(mixed.musicLevel!==.32||mixed.effectsLevel!==.5||mixed.ambientLevel!==.61)
       throw Error('Audio mixer not wired to WebAudio buses');
    if(mixed.played<2)throw Error('No sounds played after gesture');
