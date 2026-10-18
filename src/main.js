@@ -38,7 +38,7 @@ let selected='meteor',power=.75,paused=false,speed=1;
 let buildingCount=mobileDevice?10:22;
 $('#housesCount').value=String(buildingCount);
 let simTime=0,lastTick=performance.now(),fpsTimer=0;
-let rebuilding=false,soundsOn=true,qualityHigh=false,cinematic=false;
+let rebuilding=false,soundsOn=true,qualityHigh=mobileDevice,cinematic=false;
 let physicsViewer=null;
 const rescueMarkers=new RescueMarkers(canvas);
 const recordedAudio=new RecordedSoundscape({mobile:mobileDevice});
@@ -132,7 +132,12 @@ function updateStats(dt){
     const c=world.progression.stats();
     $('#cityProgress').textContent='DAY '+c.day+' · RESCUED '+c.rescued+
       ' · REBUILT '+c.rebuilt+(c.constructed?' · NEW '+c.constructed:'')+
-      (c.recovery.phase!=='idle'?' · '+({sweep:'HELI',fill:'MIXER',build:'CRANE'}[c.recovery.stage]||'RECOVERY'):'');
+      (c.fires?.burning?' · 🔥 '+c.fires.burning:'')+
+      (c.emergency?.fireEngines?' · 🚒 '+c.emergency.fireEngines:'')+
+      (c.emergency?.ambulances?' · 🚑 '+c.emergency.ambulances:'')+
+      (c.recovery.helicopters?' · 🚁 '+c.recovery.helicopters:'')+
+      (c.recovery.concreteMixers?' · MIX '+c.recovery.concreteMixers:'')+
+      (c.recovery.constructionCranes?' · 🏗 '+c.recovery.constructionCranes:'');
   }
   $('#damage').textContent=(100-integrity)+'%';
   $('#clock').textContent=timestamp();
@@ -278,7 +283,7 @@ function applyQuality(){
     // Babylon's default Engine does NOT automatically multiply the backing
     // framebuffer by devicePixelRatio. Using DPR here caused a 3x upscale
     // (310x143 on a 932x430 phone), making everything visibly blocky.
-    engine.setHardwareScalingLevel(qualityHigh?.84:mobileResolutionFactor);
+    engine.setHardwareScalingLevel(.84);
   }else{
     engine.setHardwareScalingLevel(qualityHigh?Math.max(1,window.devicePixelRatio*.85):
       Math.max(1.55,window.devicePixelRatio*1.15));
@@ -303,18 +308,6 @@ function applyQuality(){
     world.maxWallVisualPerWindow=mobileDevice?7:14;
     world.maxVisualFragments=mobileDevice?(qualityHigh?190:140):290;
   }
-  $('#settingsBtn span').textContent=mobileDevice?(qualityHigh?'SHARP':'MOBILE'):(qualityHigh?'ULTRA':'PERF');
-  $('#settingsBtn').setAttribute('aria-label',mobileDevice?(qualityHigh?'Switch to smooth mobile graphics':'Switch to sharper mobile graphics'):(qualityHigh?'Switch to performance graphics':'Switch to ultra graphics'));
-  $('#settingsBtn').title=mobileDevice?
-    (qualityHigh?'Switch to faster mobile graphics':'Switch to sharper mobile graphics'):
-    'Toggle quality';
-}
-function switchQuality(){
-  qualityHigh=!qualityHigh;
-  if(mobileDevice)mobileResolutionFactor=1.0;
-  applyQuality();
-  toast(mobileDevice?(qualityHigh?'SHARP MOBILE':'MOBILE PERFORMANCE'):
-    (qualityHigh?'ULTRA QUALITY':'PERFORMANCE MODE'));
 }
 function togglePhysicsViewer(){
   if(physicsViewer){physicsViewer.dispose();physicsViewer=null;toast('PHYSICS COLLIDERS HIDDEN');return}
@@ -397,8 +390,13 @@ async function createGame(){
   setTimeout(()=>$('#loading').classList.add('is-done'),330);
   window.disasterDebug={
     getAudio:()=>recordedAudio.getState(),
+    getCleanup:()=>({removed:world.offMapRemoved||0,freedBodies:world.offMapBodiesFreed||0,
+      pets:world.pets?.length||0,uprootedTrees:world.uprootedTrees||0,
+      waveRubbleLifted:world.waveRubbleLifted||0}),
+    getPets:()=>world.pets?.slice(0,30).map(p=>({kind:p.kind,x:p.root.position.x,y:p.root.position.y,
+       z:p.root.position.z,airborne:p.airborne})),
     playAudioForTest:(name)=>recordedAudio.play(name,walk?.camera.position),
-    getPerf:()=>({fps:engine.getFps(),drawCalls:engine._drawCalls?.current??null,meshes:scene.meshes.length,activeMeshes:scene.getActiveMeshes().length,activeIndices:scene.getActiveIndices(),hardwareScale:engine.getHardwareScalingLevel(),width:engine.getRenderWidth(),height:engine.getRenderHeight(),shadows:world.shadow.getShadowMap()?.getSize()?.width||0,batching:world.staticBatchStats,mobile:mobileDevice,quality:mobileDevice?(qualityHigh?'SHARP':'MOBILE'):(qualityHigh?'ULTRA':'PERF')}),
+    getPerf:()=>({fps:engine.getFps(),drawCalls:engine._drawCalls?.current??null,meshes:scene.meshes.length,activeMeshes:scene.getActiveMeshes().length,activeIndices:scene.getActiveIndices(),hardwareScale:engine.getHardwareScalingLevel(),width:engine.getRenderWidth(),height:engine.getRenderHeight(),shadows:world.shadow.getShadowMap()?.getSize()?.width||0,batching:world.staticBatchStats,mobile:mobileDevice,quality:mobileDevice?'SHARP MOBILE':'PERF'}),
     getState:()=>({terrainDeformations:world.terrainDeformations,craters:world.terrainCraters.length,
       ...world.progression.stats(),fps:engine.getFps(),buildings:world.buildings.length,requestedBuildings:buildingCount,floors:world.totalFloors,broken:world.brokenFloors,
     districtBuildings:world.districtBuildings.length,districtFloors:world.districtBuildings.reduce((n,b)=>n+b.floors.length,0),districtPhysicsActivated:world.districtBuildings.filter(b=>b.physicsActivated).length,cityWidth:CITY_HALF_SIZE*2,activeBodies:world.activeBodies,impacts:world.impactCount,integrity:world.integrity(),activeEffects:disasters.effects.length,craneJointActive:!!world.crane,fragments:world.fragments.length,shadowMapSize:world.shadow.getShadowMap()?.getSize().width,pendingFailures:world.pendingFailures.length,slabFractures:world.slabFractures.length,slabSplitCounts:world.slabFractures.slice(-30).map(s=>s.requestedParts),slabPhysicalParts:world.slabFractures.reduce((a,s)=>a+s.physicalParts,0),slabStaticParts:world.slabFractures.reduce((a,s)=>a+s.staticParts,0),
@@ -534,6 +532,11 @@ async function createGame(){
       people:world.civilians.slice(0,15).map(p=>({x:p.root.position.x,y:p.root.position.y,z:p.root.position.z}))
     }),
     getRecovery:()=>world.progression.recovery.currentState(),
+    getEmergency:()=>({fires:world.progression.fires?.stats(),
+      dispatch:world.progression.dispatch?.stats(),
+      responders:world.responderVehicles?.filter(e=>e.unit?.state!=='idle').map(e=>({
+        name:e.kind,x:e.mesh.position.x,z:e.mesh.position.z,state:e.unit.state}))||[]}),
+    igniteTestFire:(x=0,z=0,power=.9)=>world.progression.fires?.igniteNear({x,z},power,37),
     citizenPhysics:()=>({
       ragdolls:world.civilians.filter(p=>p.ragdoll).length,
       airborne:world.civilians.filter(p=>p.airborne).length,
@@ -555,6 +558,8 @@ async function createGame(){
     // phases deterministically, without introducing cheat controls in UI.
     tickRecoveryForTest:(seconds=1)=>{
       world.time+=Math.min(4,Math.max(.02,seconds));
+      world.progression.fires?.tick(Math.min(4,Math.max(.02,seconds)));
+      world.progression.dispatch?.tick(Math.min(4,Math.max(.02,seconds)),false);
       world.progression.recovery.tick(Math.min(4,Math.max(.02,seconds)));
       return {recovery:world.progression.recovery.currentState(),
         craters:world.terrainCraters.length,broken:world.brokenFloors};
@@ -669,7 +674,7 @@ function bindUI(){
   for(const name of ['pointerup','pointercancel','lostpointercapture'])
     stick.addEventListener(name,e=>walk?.releaseJoystick(e,thumb));
   $('#resetBtn').addEventListener('click',()=>createGame());
-  $('#settingsBtn').addEventListener('click',switchQuality);
+
   $('#fullscreenBtn').addEventListener('click',toggleFullscreen);
   document.addEventListener('fullscreenchange',syncFullscreenUI);
   document.addEventListener('webkitfullscreenchange',syncFullscreenUI);

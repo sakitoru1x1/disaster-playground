@@ -9,6 +9,9 @@ import {splitOnCollision,splitVisualOnLanding,queueSecondaryFracture,canVisually
 import {populateCityLife,affectCityLife,updateCityLife} from './cityLife.js';
 import {trafficRoutes,positionOnRoute,trafficHeading} from './cityMotion.js';
 import {CityProgression} from './cityProgression.js';
+import {spawnPets,affectPets,updatePets} from './cityPets.js';
+import {cullOutOfBounds} from './worldReclamation.js';
+import {updateFlyingTrees} from './looseObjectPhysics.js';
 import {applyCrater} from './terrainDamage.js';
 import {buildCitySurfaceSkins} from './terrainSurface.js';
 import {planCity,BLOCK_COORDS,ROAD_COORDS,CITY_HALF_SIZE,isPark} from './cityLayout.js';
@@ -112,6 +115,8 @@ export class CityWorld {
     addDistrictContacts(this);
     this.makeProps();
     populateCityLife(this);
+    spawnPets(this);
+    this.structures.forEach(e=>{e.homePosition=e.mesh.position.clone()});
     this.progression=new CityProgression(this);
     this.optimizeStaticGeometry();
   }
@@ -456,6 +461,9 @@ export class CityWorld {
     // while only being scratched. Activate floor-by-floor Havok physics only
     // when a storey actually needs to fracture in release().
     this.audio?.play('crack',impactAt||entry.mesh.position,Math.min(.9,amount/90));
+    if((source==='meteor'||source==='blast')&&amount>16&&
+       (entry.building?.id??-1)%3===0)
+      this.progression?.fires?.ignite(entry.building,Math.min(1,amount/140));
     entry.health=Math.max(0,entry.health-amount);
     entry.damageTaken+=amount;
     const ratio=entry.health/entry.maxHealth;
@@ -721,7 +729,10 @@ export class CityWorld {
     }
     return mesh;
   }
-  affectLife(kind,center,power,radius,dt){affectCityLife(this,kind,center,power,radius,dt)}
+  affectLife(kind,center,power,radius,dt){
+    affectCityLife(this,kind,center,power,radius,dt);
+    affectPets(this,kind,center,power,radius,dt);
+  }
   damageTerrain(x,z,k,kind){return applyCrater(this,x,z,k,kind)}
   integrity(){
     if(!this.structures.length)return 100;
@@ -734,6 +745,13 @@ export class CityWorld {
   update(dt){
     this.time+=dt;
     updateCityLife(this,dt);
+    updatePets(this,dt);
+    updateFlyingTrees(this,dt);
+    this.nextOutOfBoundsSweep=(this.nextOutOfBoundsSweep||0)-dt;
+    if(this.nextOutOfBoundsSweep<=0){
+      this.nextOutOfBoundsSweep=.55;
+      cullOutOfBounds(this);
+    }
     if(this.time-this.lastMarkCleanup>2){
       this.lastMarkCleanup=this.time;
       for(let i=this.decorativeMarks.length-1;i>=0;i--){
@@ -919,7 +937,7 @@ export class CityWorld {
     if(this.sea){
       this.sea.position.y=-3.25+Math.sin(this.time*.85)*.06;
     }
-    for(const tree of this.trees)tree.root.rotation.z*=.87;
+    for(const tree of this.trees)if(!tree.airborne)tree.root.rotation.z*=.87;
     if(this.crane){
       const {anchor,ball,cable}=this.crane;
       const delta=ball.getAbsolutePosition().subtract(anchor),length=delta.length();

@@ -2,7 +2,9 @@ import {civilianPosition,settleCitizenRagdoll} from './citizenRagdolls.js';
 import {MeshBuilder,TransformNode,PhysicsAggregate,PhysicsShapeType,PhysicsMotionType,Quaternion,Vector3} from '@babylonjs/core';
 import {trafficRoutes,positionOnRoute,trafficHeading} from './cityMotion.js';
 import {planCity} from './cityLayout.js';
-import {RecoveryConvoy} from './cityRecovery.js';
+import {ParallelRecovery} from './parallelRecovery.js';
+import {CityFires} from './cityFires.js';
+import {EmergencyDispatch} from './cityEmergency.js';
 const V=(x,y,z)=>new Vector3(x,y,z);
 function distance(a,b){return Math.hypot(a.x-b.x,a.z-b.z)}
 export class CityProgression {
@@ -12,14 +14,19 @@ export class CityProgression {
   this.nextConstruction=65;
   this.emergencyVehicles=0;this.active=false;this.needsDispatch=false;
   this.nextRepair=0;this.rescueCooldown=0;this.day=1;this.lightPhase=0;
-  this.recovery=new RecoveryConvoy(world,this);
+  this.fires=world.scene&&world.mat?new CityFires(world):null;
+  this.dispatch=world.scene&&world.mat?new EmergencyDispatch(world,this):null;
+  this.recovery=new ParallelRecovery(world,this);
  }
  event(type){
   this.lastDisaster=this.world.time;
   this.active=true;this.needsDispatch=true;
-  this.incidents++;this.recovery.event();
+  this.incidents++;this.recovery.event();this.dispatch?.event();
  }
  launchResponders(){
+  // The new dispatcher owns distinct response routes and on-site scenes.
+  // Old ambulances drove endlessly around arbitrary block loops.
+  if(this.dispatch)return;
   const world=this.world;
   for(let n=0;n<2;n++){
    const carPlan=trafficRoutes(2)[n],route=carPlan.route;
@@ -79,7 +86,12 @@ export class CityProgression {
    ['meteor','tornado','quake','tsunami'].includes(e.type))||
    disasters?.blastWaves?.some(w=>!w.finished);
   if(danger)this.lastDisaster=time;
-  if(!this.active){this.tryBuildNewBlock(time);return}
+  this.fires?.tick(dt);
+  this.dispatch?.tick(dt,!!danger);
+  if(!this.active){
+    if(this.fires?.fires.size)return; // don't spontaneously build while burning
+    this.tryBuildNewBlock(time);return
+  }
   // Dispatch emergency vehicles only after the dangerous wave passes;
   // deploying them during the earthquake instantly wrecked the ambulances.
   if(this.needsDispatch&&!danger&&time-this.lastDisaster>2){
@@ -118,7 +130,9 @@ export class CityProgression {
   // Dispatch the cleanup helicopter after a bounded wait, even if a few
   // sections are still settling. Delay actual rebuilding until stable.
   if(world.pendingFailures.length&&time-this.lastDisaster<24)return;
-  if(world.pendingFailures.length&&['fill','build'].includes(this.recovery.stage))return;
+  // Crews coordinate PER PROPERTY. One site may already have poured
+  // concrete while several other helicopters are removing wreckage.
+  // A single delayed collapse no longer stalls every other district.
   this.recovery.tick(dt);
   if(this.recovery.stage==='complete')this.tryBuildNewBlock(time);
  }
@@ -160,6 +174,8 @@ export class CityProgression {
   return {day:this.day,incidents:this.incidents,rescued:this.rescued,rebuilt:this.rebuilt,constructed:this.constructed,
    emergencyVehicles:this.world.props.filter(p=>p.emergency&&p.traffic?.state==='driving').length,dispatchPending:this.needsDispatch,
    injured:this.world.civilians.filter(p=>p.state==='injured').length,
+   fires:this.fires?.stats()||{burning:0,started:0,extinguished:0},
+   emergency:this.dispatch?.stats()||{ambulances:0,fireEngines:0},
    recovery:this.recovery.currentState()};
  }
 }

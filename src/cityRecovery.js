@@ -337,14 +337,15 @@ function updateTowerLift(crane,building,elapsed){
  return true;
 }
 export class RecoveryConvoy{
- constructor(world,progression){
+ constructor(world,progression,{manual=false}={}){
+  this.manual=manual;
   this.world=world;this.progression=progression;
   this.phase='idle';this.stage='sweep';this.elapsed=0;this.site=null;
   this.visited=new Set();this.floorIndex=0;
   this.removed=0;this.filled=0;this.completed=0;this.sweepRuns=0;
   this.heli=null;this.mixer=null;this.crane=null;this.truck=null;
   this.pourPatch=null;this.pourStream=null;
-  this.hoverY=20;this.collected=0;
+  this.hoverY=20;this.collected=0;this.lastFinished=null;
  }
  event(){
   this.stage='sweep';this.phase='idle';this.site=null;this.elapsed=0;
@@ -358,10 +359,16 @@ export class RecoveryConvoy{
   for(const vehicle of [this.heli,this.mixer,this.crane,this.truck])
    vehicle?.root.setEnabled(false);
  }
- initFleet(){
-  if(this.heli)return;
-  const w=this.world;this.heli=buildHelicopter(w);
-  this.mixer=buildMixer(w);this.crane=buildTowerCrane(w);this.truck=buildTruck(w);
+ initFleet(stage){
+  const w=this.world;
+  // One work crew should not spawn an invisible heavy tower crane while
+  // flying a helicopter. Every unit now allocates ONLY its actual machine.
+  if(stage==='sweep'&&!this.heli)this.heli=buildHelicopter(w);
+  if(stage==='fill'&&!this.mixer)this.mixer=buildMixer(w);
+  if(stage==='build'){
+   if(!this.crane)this.crane=buildTowerCrane(w);
+   if(!this.truck)this.truck=buildTruck(w);
+  }
  }
  currentState(){
   const helicopter=this.heli?.root,site=this.site;
@@ -385,7 +392,7 @@ export class RecoveryConvoy{
  start(stage,site){
   this.stage=stage;this.site=site;this.phase='arrive';this.elapsed=0;
   this.world.audio?.play('select',site,.3);
-  this.initFleet();this.park();
+  this.initFleet(stage);this.park();
   const agent=stage==='sweep'?this.heli:stage==='fill'?this.mixer:this.crane;
   agent.root.setEnabled(true);
   if(stage==='build')this.truck.root.setEnabled(true);
@@ -415,6 +422,7 @@ export class RecoveryConvoy{
   }
  }
  finishStage(){
+  this.lastFinished={stage:this.stage,site:this.site};
   this.park();this.phase='idle';this.site=null;this.elapsed=0;
   this.pourStream?.dispose();this.pourStream=null;this.pourPatch=null;
   if(this.heli?.load.length)dumpCargo(this.heli);
@@ -430,6 +438,7 @@ export class RecoveryConvoy{
   }
   if(this.mixer)this.mixer.drum.rotation.z+=dt*1.6;
   if(this.phase==='idle'){
+   if(this.manual)return false;
    if(this.stage==='sweep'){
     const site=recoverySite(w,this.visited);
     if(site){this.start('sweep',site);return true}

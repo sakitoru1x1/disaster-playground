@@ -20,7 +20,10 @@ const BANK={
  winch:'machine',drum:'machinery_2.ogg',pour:'water_ambient.ogg',
  footstep:'footstep_1.ogg',footstep2:'footstep_2.ogg',footstepWet:'footstep_wet.ogg',
  ui:'ui_click.ogg',select:'ui_select.ogg',heal:'ui_select.ogg',
- horn:'car_idle.wav',hurt:'impact_2.ogg'
+ horn:'car_idle.wav',hurt:'impact_2.ogg',
+ catMeow:'cat_meow.wav',catPanic:'cat_meow2.ogg',catPurr:'cat_purr.wav',
+ dogBark:'dog_bark2.ogg',dogPanic:'dog_bark.wav',
+ fire:'fire_crackle.ogg',responder:'car_idle.wav'
 };
 BANK.winch='machinery_1.ogg';
 const EFFECTS={
@@ -45,12 +48,16 @@ const EFFECTS={
  hurt:{key:'hurt',volume:.27,priority:1,cooldown:.38},
  ui:{key:'ui',volume:.24,priority:0,cooldown:.07},
  select:{key:'select',volume:.25,priority:0,cooldown:.07},
- flyby:{key:'flyby',volume:.50,priority:1,cooldown:3}
+ flyby:{key:'flyby',volume:.50,priority:1,cooldown:3},
+ catMeow:{key:['catMeow','catPurr'],volume:.46,priority:0,cooldown:1.5,group:'pet'},
+ dogBark:{key:'dogBark',volume:.50,priority:0,cooldown:1.5,group:'pet'},
+ catPanic:{key:'catPanic',volume:.62,priority:1,cooldown:.5,group:'petAlarm'},
+ dogPanic:{key:'dogPanic',volume:.60,priority:1,cooldown:.5,group:'petAlarm'}
 };
 const LOOP={
  musicCalm:.13,musicDanger:.14,city:.06,construction:.16,water:.10,
  car:.25,carIdle:.20,helicopter:.59,machine:.18,motor:.23,
- storm:.32,siren:.12,drum:.32,pour:.30
+ storm:.32,siren:.14,drum:.32,pour:.30,fire:.24,responder:.27
 };
 const COOLDOWN={rubble:.22};
 export class RecordedSoundscape{
@@ -171,7 +178,13 @@ export class RecordedSoundscape{
   if(this.loops.has(name))return this.loops.get(name);
   const slot={gain:0,target:0,source:null,node:null,position:null,rate:1};
   this.loops.set(name,slot);
-  const base=name.startsWith('car')?'car':name;
+  const base=name.startsWith('car')?'car':
+   name.startsWith('heli')?'helicopter':
+   name.startsWith('crane')?'machine':
+   name.startsWith('mixer')?'drum':
+   name.startsWith('truck')?'responder':
+   name.startsWith('emergencySiren')?'siren':
+   name.startsWith('fire')?'fire':name;
   const buffer=await this.load(base);
   if(!buffer||!this.ctx){this.loops.delete(name);return null}
   // The loop may have become inactive while the asset was decoding.
@@ -184,7 +197,14 @@ export class RecordedSoundscape{
  }
  loop(name,value,position=null,rate=1){
   if(!this.ctx)return;
-  const desired=CLAMP(value)* (LOOP[name.startsWith('car')?'car':name]??.15);
+  const base=name.startsWith('car')?'car':
+   name.startsWith('heli')?'helicopter':
+   name.startsWith('crane')?'machine':
+   name.startsWith('mixer')?'drum':
+   name.startsWith('truck')?'responder':
+   name.startsWith('emergencySiren')?'siren':
+   name.startsWith('fire')?'fire':name;
+  const desired=CLAMP(value)*(LOOP[base]??.15);
   let slot=this.loops.get(name);
   if(desired<.008&&!slot)return; // never create silent background audio
   if(!slot){this.ensureLoop(name);slot=this.loops.get(name)}
@@ -222,12 +242,46 @@ export class RecordedSoundscape{
    this.loop('car'+i,mode*g*(danger?.5:1),p?.mesh.position,
      CLAMP(.86+(p?.traffic?.speed||10)/55,.8,1.22));
   }
-  const active=!!recovery&&phase!=='idle';
-  this.loop('helicopter',mode*(active&&stage==='sweep'?1:0),recovery?.heli?.root.position);
-  this.loop('machine',mode*(active&&stage==='build'?.76:0),recovery?.crane?.root.position);
-  this.loop('drum',mode*(active&&stage==='fill'?.72:0),recovery?.mixer?.root.position);
-  this.loop('construction',mode*(active&&stage==='build'?.40:0),recovery?.crane?.root.position);
-  this.loop('pour',mode*(stage==='fill'&&phase==='pour'?.7:0),recovery?.site);
+  // Independent helicopter rotors, moving mixers and cranes: each audible
+  // machine retains its own true 3D position instead of sounding from a
+  // single 'global recovery' machine.
+  const crews=recovery?.units;
+  const use=(kind,prefix,volume,getPosition,activePhase=null)=>{
+   const pool=crews?.[kind]||[];
+   for(let i=0;i<pool.length;i++){
+    const crew=pool[i];
+    const busy=crew.phase!=='idle'&&crew.stage===kind&&
+      (!activePhase||crew.phase===activePhase);
+    this.loop(prefix+i,mode*(busy?volume:0),getPosition(crew));
+   }
+  };
+  if(crews){
+   use('sweep','heli',.81,c=>c.heli?.root.position);
+   use('fill','mixer',.60,c=>c.mixer?.root.position);
+   use('build','crane',.72,c=>c.crane?.root.position);
+   for(let i=0;i<(crews.build?.length||0);i++){
+    const c=crews.build[i];
+    this.loop('truck'+i,mode*(c.phase==='arrive'?.48:0),c.truck?.root.position);
+   }
+  }else{
+   const active=!!recovery&&phase!=='idle';
+   this.loop('helicopter',mode*(active&&stage==='sweep'?1:0),recovery?.heli?.root.position);
+   this.loop('machine',mode*(active&&stage==='build'?.76:0),recovery?.crane?.root.position);
+   this.loop('drum',mode*(active&&stage==='fill'?.72:0),recovery?.mixer?.root.position);
+  }
+  const fireUnits=[...(world.progression?.fires?.fires?.values()||[])];
+  const fireSource=fireUnits.map(f=>({f,g:this.spatial(f.anchor,48).gain}))
+    .sort((a,b)=>b.g-a.g)[0];
+  this.loop('fireSound',mode*(fireSource?.f?.heat||0)*.7,fireSource?.f?.anchor);
+  const responders=(world.responderVehicles||[]).filter(u=>u.unit?.state!=='idle')
+    .map(u=>({u,g:this.spatial(u.mesh.position,67).gain}))
+    .sort((a,b)=>b.g-a.g).slice(0,this.mobile?2:3);
+  for(let i=0;i<(this.mobile?2:3);i++){
+   const vehicle=responders[i]?.u;
+   this.loop('emergencySiren'+i,mode*(vehicle?.48:0),vehicle?.mesh.position);
+   this.loop('truck'+(i+4),mode*(vehicle?.unit?.state==='driving'?.40:0),
+    vehicle?.mesh.position);
+  }
   this.loop('storm',mode*(disasters?.effects?.some(e=>e.type==='tornado')?.65:0),
     disasters?.effects?.find(e=>e.type==='tornado')?.root?.position);
   this.loop('water',mode*(disasters?.effects?.some(e=>e.type==='tsunami')?.55:0),
@@ -240,8 +294,6 @@ export class RecordedSoundscape{
     this.lastStep=now+(speed>8?.26:.37);
    }
   }
-  const rescueVehicle=(world.props||[]).find(p=>p.emergency&&p.traffic?.state==='driving');
-  this.loop('siren',mode*(rescueVehicle?.26:0),rescueVehicle?.mesh.position);
   const phaseName=stage+':'+phase;
   if(active&&phaseName!==this.previousRecovery){
    if(stage==='sweep'&&phase==='arrive')this.play('flyby',recovery.site,1);

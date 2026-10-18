@@ -220,5 +220,41 @@
     "license": "CC0",
     "source": "https://opengameart.org/content/storm-siren",
     "original": "storm_3_siren.ogg (9 s excerpt, resampled 16 kHz mono)"
+  },
+  "cat_meow.wav": {
+    "artist": "Kerzoven",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/cat-purr-meow",
+    "original": "https://opengameart.org/sites/default/files/cat_softmew.wav"
+  },
+  "cat_purr.wav": {
+    "artist": "Kerzoven",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/cat-purr-meow",
+    "original": "https://opengameart.org/sites/default/files/cat_mewpurr.wav"
+  },
+  "dog_bark.wav": {
+    "artist": "Brandon Morris",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/dog-barking-mono",
+    "original": "https://opengameart.org/sites/default/files/dog_barking_mono.wav"
+  },
+  "dog_bark2.ogg": {
+    "artist": "Brandon Morris",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/random-sounds-samples",
+    "original": "https://opengameart.org/sites/default/files/dog%20barking.ogg"
+  },
+  "cat_meow2.ogg": {
+    "artist": "IgnasD",
+    "license": "CC0",
+    "source": "https://lpc.opengameart.org/content/meow",
+    "original": "https://lpc.opengameart.org/sites/default/files/Meow.ogg"
+  },
+  "fire_crackle.ogg": {
+    "artist": "AntumDeluge",
+    "license": "CC0",
+    "source": "https://opengameart.org/content/fire-crackling",
+    "original": "https://opengameart.org/sites/default/files/fire-1_0.ogg"
   }
 }

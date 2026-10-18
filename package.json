@@ -24,7 +24,9 @@
     "test:recovery:e2e": "node tests/recoveryIntegration.cjs",
     "test:recorded:browser": "node tests/recordedAudioBrowser.cjs",
     "test:citizen-ragdolls": "node tests/citizenRagdolls.test.mjs",
-    "test:citizen-ragdolls:browser": "node tests/citizenRagdollsBrowser.cjs"
+    "test:citizen-ragdolls:browser": "node tests/citizenRagdollsBrowser.cjs",
+    "test:services": "node tests/cityServices.test.mjs",
+    "test:services:browser": "node tests/cityServicesBrowser.cjs"
   },
   "dependencies": {
     "@babylonjs/core": "^9.31.0",

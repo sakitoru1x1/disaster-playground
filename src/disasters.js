@@ -8,6 +8,7 @@ import {meteorPower,meteorScale,meteorWaveDamage,meteorHitDistribution} from './
 import {severity,level,quakeDamage,quakeShake,tsunamiDamage,tsunamiHeight} from './disasterBalance.js';
 import {CITY_HALF_SIZE} from './cityLayout.js';
 import {releaseTrafficCar} from './cityLife.js';
+import {sweepLooseObjects,liftWaveRubble,tossStormTrees} from './looseObjectPhysics.js';
 const V=(x,y,z)=>new Vector3(x,y,z);
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(a,l,h)=>Math.max(l,Math.min(h,a));
@@ -166,6 +167,9 @@ export class DisasterSystem{
     if(wave.finished)this.finishBlastLog(wave);
     if(strength>.14)w.damageTerrain(p.x,p.z,strength,'meteor');
     w.tossDebris(V(p.x,Math.max(2,p.y*.38),p.z),Math.round(2+14*strength),.22+.78*strength);
+    // Flames remain in broken windows after the impact flash and smoke;
+    // fire engines have an actual emergency to suppress.
+    w.progression?.fires?.igniteNear(p,strength,Math.min(44,scale.radius*.68));
     this.world.createBurst(p,'fire',scale.particles,.7+strength*1.3);
     this.world.createBurst(ground,'dust',Math.round(scale.particles*.85),.6+strength);
     this.world.scorch(ground,3+scale.coreRadius*.65,true);
@@ -502,6 +506,7 @@ export class DisasterSystem{
       fx.liftPulse=0;
       activateWindRubble(w,center,radius,k,4);
     }
+    if(k>.45)tossStormTrees(w,center,radius,k);
     // Visual-only fallback rubble is still caught by the airflow.
     for(const part of w.visualFragments){
       const p=part.mesh.position;
@@ -591,6 +596,15 @@ export class DisasterSystem{
       else if(entry.health<=0){fx.deferred=(fx.deferred||0)+1;w.tsunamiDeferred++}
     }
     fx.lastX=front;
+    // Swept wave front lifts timber, dormant concrete rubble, visual slabs,
+    // active construction debris, and cars without tunnelling over fast ticks.
+    sweepLooseObjects(w,front,fx.waveHeight,k,dt,fx.lastLooseX??fx.lastX??front);
+    fx.lastLooseX=front;
+    fx.waveLiftTimer=(fx.waveLiftTimer||0)+dt;
+    if(fx.waveLiftTimer>.26){
+      fx.waveLiftTimer=0;
+      liftWaveRubble(w,front,fx.waveHeight,k,w.mobile?3:6);
+    }
     // Strong water carries loose rigid bodies; small tides don't launch cars.
     for(const prop of w.props){
       if(prop.type!=='car'||!prop.aggregate)continue;
@@ -600,12 +614,6 @@ export class DisasterSystem{
         const force=80*k*k+1600*Math.pow(k,3);
         prop.aggregate.body.applyForce(V(force,150*k*k,rand(-130,130)*k*k),p);
       }
-    }
-    for(const part of w.fragments.slice(0,100)){
-      if(!part.aggregate)continue;
-      const p=part.mesh.getAbsolutePosition();
-      if(Math.abs(p.x-front)<7&&p.y<fx.waveHeight+1)
-        part.aggregate.body.applyForce(V(90+740*k*k,130*k*k,rand(-100,100)*k),p);
     }
     w.affectLife?.('tsunami',V(front,0,0),k,8+8*k,dt);
     fx.lastSpray+=dt;
