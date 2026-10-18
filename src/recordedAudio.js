@@ -245,6 +245,7 @@ export class RecordedSoundscape{
   // Independent helicopter rotors, moving mixers and cranes: each audible
   // machine retains its own true 3D position instead of sounding from a
   // single 'global recovery' machine.
+  const active=!!recovery&&phase!=='idle';
   const crews=recovery?.units;
   const use=(kind,prefix,volume,getPosition,activePhase=null)=>{
    const pool=crews?.[kind]||[];
@@ -264,7 +265,6 @@ export class RecordedSoundscape{
     this.loop('truck'+i,mode*(c.phase==='arrive'?.48:0),c.truck?.root.position);
    }
   }else{
-   const active=!!recovery&&phase!=='idle';
    this.loop('helicopter',mode*(active&&stage==='sweep'?1:0),recovery?.heli?.root.position);
    this.loop('machine',mode*(active&&stage==='build'?.76:0),recovery?.crane?.root.position);
    this.loop('drum',mode*(active&&stage==='fill'?.72:0),recovery?.mixer?.root.position);
