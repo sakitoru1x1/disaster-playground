@@ -35,7 +35,9 @@ function styleOf(person){
  return {torso:t.find(m=>m.name.startsWith('person torso'))?.material,
   arms:t.find(m=>m.name.startsWith('person arm'))?.material,
   legs:t.find(m=>m.name.startsWith('person leg'))?.material,
-  head:t.find(m=>m.name.startsWith('person head'))?.material};
+  head:t.find(m=>m.name.startsWith('person head'))?.material,
+  hair:t.find(m=>m.name.startsWith('person hairstyle')||
+    m.name.startsWith('person protective helmet'))?.material};
 }
 export function launchCitizenRagdoll(world,person,force){
  if(person.ragdoll||person.airborne)return false;

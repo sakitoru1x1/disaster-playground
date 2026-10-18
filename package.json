@@ -32,7 +32,9 @@
     "test:dispatch:e2e": "node tests/dispatchIntegration.cjs",
     "test:coordination": "node tests/dispatchCoordination.test.mjs",
     "test:emergency-routes": "node tests/emergencyRoutes.test.mjs",
-    "test:emergency-routes:browser": "node tests/emergencyRoutesBrowser.cjs"
+    "test:emergency-routes:browser": "node tests/emergencyRoutesBrowser.cjs",
+    "test:character-art": "node tests/characterArt.test.mjs",
+    "test:character-art:browser": "node tests/characterArtBrowser.cjs"
   },
   "dependencies": {
     "@babylonjs/core": "^9.31.0",

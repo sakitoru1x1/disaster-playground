@@ -15,14 +15,31 @@ export class PhysicalRagdoll {
   ];
   for(let i=0;i<pieces.length;i++){
    const [name,size,offset,mass]=pieces[i];
-   const mesh=MeshBuilder.CreateBox('ragdoll '+name,
-    {width:size[0],height:size[1],depth:size[2]},scene);
+   // The physics body keeps the same Havok BOX collision envelope, but
+   // the artwork now matches the rounded citizens rather than becoming
+   // six rectangular bricks when a resident gets thrown by a disaster.
+   const mesh=name==='head'
+    ?MeshBuilder.CreateSphere('ragdoll '+name,
+      {diameter:1,segments:9},scene)
+    :MeshBuilder.CreateCylinder('ragdoll '+name,
+      {height:size[1],diameterTop:name==='torso'?.71:size[0],
+       diameterBottom:name==='torso'?.47:size[0]*.90,tessellation:9},scene);
+   if(name==='head')mesh.scaling.set(size[0],size[1],size[2]);
+   else mesh.scaling.z=name==='torso'?.65:1;
    mesh.position=at.add(V(...offset));
    const mat=style?.[i===0?'torso':i===1?'head':i<4?'arms':'legs']||
      scene.getMaterialByName(i===1?'citizen skin':
        i<=3?'citizen jacket 0':'citizen trousers');
    if(mat)mesh.material=mat;
    mesh.isPickable=false;
+   if(name==='head'&&style?.hair){
+     const hairstyle=MeshBuilder.CreateSphere('ragdoll hair',
+       {diameter:1,segments:8},scene);
+     hairstyle.parent=mesh;
+     hairstyle.position.set(0,.33,-.025);
+     hairstyle.scaling.set(1.05,.36,1.08);
+     hairstyle.material=style.hair;hairstyle.isPickable=false;
+   }
    const aggregate=new PhysicsAggregate(mesh,PhysicsShapeType.BOX,
     {mass,friction:.77,restitution:.10},scene);
    aggregate.body.setLinearDamping(.24);

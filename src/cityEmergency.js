@@ -1,6 +1,7 @@
 import {TransformNode,Vector3,Quaternion} from '@babylonjs/core';
 import {ROAD_COORDS,CITY_HALF_SIZE} from './cityLayout.js';
 import {civilianPosition,settleCitizenRagdoll} from './citizenRagdolls.js';
+import {createCharacter} from './characterArt.js';
 
 const V=(x,y,z)=>new Vector3(x,y,z),distance=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
 const clamp=(n,a=0,b=1)=>Math.max(a,Math.min(b,n));
@@ -63,25 +64,14 @@ function makeResponderVehicle(w,kind,id){
  return {root,left,right,kind};
 }
 function makeRescuer(w,unit,idx){
- const scene=w.scene;
  const root=new TransformNode('VISIBLE '+(unit.kind==='fire'?'FIREFIGHTER':'PARAMEDIC')+
-  ' '+unit.id+' '+idx,scene);
- const suit=w.mat(unit.id+' uniform',unit.kind==='fire'?'#dfaa42':'#f3e9e1');
- const pants=w.mat(unit.id+' work trousers',unit.kind==='fire'?'#292f31':'#405769');
- const helmet=w.mat(unit.id+' safety helmet',unit.kind==='fire'?'#f4d24b':'#edebdf');
- w.box('RESPONDER BODY',[.66,.85,.43],V(0,1.16,0),suit,root);
- w.box('RESPONDER HIGH VIS',[.71,.17,.47],V(0,1.03,0),unit.kind==='fire'?helmet:pants,root);
- w.cylinder('RESPONDER HEAD',.47,.43,V(0,1.86,0),w.materials.pedHeads,8,root);
- w.box('RESPONDER HELMET',[.55,.14,.50],V(0,2.15,0),helmet,root);
- const legs=[],arms=[];
- for(const side of [-1,1]){
-  legs.push(w.box('RESPONDER WALKING LEG',[.18,.72,.22],
-   V(side*.19,.40,0),pants,root));
-  arms.push(w.box('RESPONDER ARM',[.17,.72,.19],
-   V(side*.43,1.16,0),suit,root));
- }
+  ' '+unit.id+' '+idx,w.scene);
+ const role=unit.kind==='fire'?'fire':'medic';
+ const appearance=createCharacter(w,root,(unit.kind==='fire'?4100:3200)+
+   Number(unit.id.split('-').pop())*2+idx,{role});
  root.setEnabled(false);
- return {root,legs,arms,index:idx,stride:idx*Math.PI};
+ return {root,legs:appearance.legs,arms:appearance.arms,headRig:appearance.headRig,
+   appearance,index:idx,stride:idx*Math.PI};
 }
 function createFieldHospital(w){
  const root=new TransformNode('VISIBLE CITY RESCUE FIELD HOSPITAL',w.scene);

@@ -1,4 +1,5 @@
-import {MeshBuilder,Vector3} from '@babylonjs/core';
+import {MeshBuilder,Vector3,TransformNode} from '@babylonjs/core';
+import {createCharacter} from './characterArt.js';
 const V=(x,y,z)=>new Vector3(x,y,z);
 const near=(a,b,r)=>Math.hypot(a.x-b.x,a.z-b.z)<r;
 export function siteMustPause(site,dispatcher){
@@ -48,17 +49,14 @@ export class WorksiteVisuals{
     [2.5,.36,1.8],V(3,.55+i*.38,-5),this.matWhite,root));
   // Two high-vis construction crew, legs animate only while crane is active.
   const workers=[];
-  const helmet=w.mat('WORKSITE HELMET YELLOW','#f5cb42');
   for(let i=0;i<2;i++){
-   const worker=w.box('BUILDER HI VIS VEST',[.62,.83,.38],V(i?4:-3,1.21,4),
-      this.matOrange,root);
-   const head=w.cylinder('CONSTRUCTION CREW HELMET',.56,.38,
-     V(i?4:-3,1.97,4),helmet,7,root);
-   const legs=[];
-   for(const side of [-1,1])legs.push(w.box('BUILDER LEG',
-      [.18,.75,.20],V((i?4:-3)+side*.17,.41,4),this.matSteel,root));
-   workers.push({worker,head,legs});
-   elements.push(worker,head,...legs);
+   const workerRoot=new TransformNode('HI VIS CONSTRUCTION BUILDER '+i,w.scene);
+   workerRoot.parent=root;workerRoot.position=V(i?4:-3,0,4);
+   const appearance=createCharacter(w,workerRoot,this.pool.length*2+i+6100,
+     {role:'builder'});
+   workers.push({workerRoot,appearance,legs:appearance.legs,
+     worker:workerRoot,head:appearance.headRig});
+   elements.push(...workerRoot.getChildMeshes());
   }
   root.setEnabled(false);
   return {root,elements,cones,materialPallet,blocks,workers,key:null,phase:null,age:0};
@@ -93,7 +91,7 @@ export class WorksiteVisuals{
    instance.blocks.forEach(b=>b.setEnabled(building));
    for(let i=0;i<instance.workers.length;i++){
     const w=instance.workers[i];
-    w.worker.setEnabled(building);w.head.setEnabled(building);
+    w.worker.setEnabled(building);
     w.legs.forEach((leg,j)=>{
      leg.setEnabled(building);
      leg.rotation.x=building?Math.sin(instance.age*3+j*Math.PI+i)*.25:0;

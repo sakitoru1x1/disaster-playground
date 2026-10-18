@@ -1,6 +1,6 @@
 import {
   Engine, Scene, ArcRotateCamera, Vector3, Matrix, Color3,
-  DefaultRenderingPipeline, HavokPlugin, Plane, PhysicsAggregate, PhysicsShapeType
+  DefaultRenderingPipeline, HavokPlugin, Plane, PhysicsAggregate, PhysicsShapeType, TransformNode
 } from '@babylonjs/core';
 import HavokPhysics from '@babylonjs/havok';
 import {CityWorld} from './world.js';
@@ -9,6 +9,7 @@ import {RescueMarkers} from './rescueMarkers.js';
 import {RecordedSoundscape} from './recordedAudio.js';
 import {WalkController} from './walkController.js';
 import {FlyController} from './flyController.js';
+import {createCharacter} from './characterArt.js';
 import {pauseCityTraffic,cityClock,citizenStats} from './cityLife.js';
 import {CITY_HALF_SIZE} from './cityLayout.js';
 import {initializeTerrain} from './terrainDamage.js';
@@ -557,6 +558,42 @@ async function createGame(){
       trees:world.trees.slice(0,12).map(t=>({x:t.root.position.x,y:t.root.position.y,z:t.root.position.z})),
       people:world.civilians.slice(0,15).map(p=>({x:p.root.position.x,y:p.root.position.y,z:p.root.position.z}))
     }),
+    getCharacterArt:()=>({
+      residents:world.civilians.length, libraryMasters:world.characterLibrary?.meshes.length||0,
+      meshInstances:scene.meshes.filter(m=>m.name.startsWith('person ')).length,
+      archetypes:world.civilians.reduce((n,p)=>(n[p.characterAge]=(n[p.characterAge]||0)+1,n),{}),
+      professions:{
+        medics:world.progression.dispatch?.units.ambulance.reduce((n,u)=>n+u.crew.length,0)||0,
+        firefighters:world.progression.dispatch?.units.fire.reduce((n,u)=>n+u.crew.length,0)||0,
+        builders:world.progression.recovery.worksites?.pool.length*2||0
+      }
+    }),
+    characterShowcase:()=>{
+      // Genuine live Babylon models, used by visual QA only. The camera
+      // points at the real city with no AI-created artwork or overlays.
+      if(window.__characterShowcase)for(const node of window.__characterShowcase)node.dispose(false,false);
+      const roles=['civilian','civilian','medic','fire','builder','civilian','civilian'];
+      const people=[];
+      const origin=new Vector3(0,.20,-143); // open waterfront beyond last building plots
+      for(let i=0;i<roles.length;i++){
+        const root=new TransformNode('ACTUAL IN GAME CHARACTER QA '+i,scene);
+        root.position=origin.add(new Vector3((i-3)*1.65,0,0));
+        root.rotation.y=Math.PI; // face the camera
+        const art=createCharacter(world,root,[4,5,3,3,3,3,0][i]+1000,
+          {role:roles[i],age:['elder','child','adult','adult','adult','teen','adult'][i]});
+        people.push(root);
+      }
+      window.__characterShowcase=people;
+      if(walk?.enabled)toggleWalkMode();
+      if(!fly?.enabled)toggleFlyMode(true);
+      // The orbit camera follows the city center and forcibly re-centers
+      // every frame; FLY is the genuine freely positioned runtime camera.
+      fly.camera.position.copyFrom(origin).addInPlaceFromFloats(0,1.25,-10);
+      fly.camera.rotation.set(0,0,0);
+      fly.yaw=0;fly.pitch=0;
+      fly.camera.fov=.92;
+      return {roles,camera:fly.camera.position.clone(),characters:people.length};
+    },
     getRecovery:()=>world.progression.recovery.currentState(),
     getEmergency:()=>({fires:world.progression.fires?.stats(),
       dispatch:world.progression.dispatch?.stats(),

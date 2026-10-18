@@ -6,6 +6,7 @@ import {terrainDisplacement} from './terrainDamage.js';
 import {civilianPosition,pushCitizenRagdoll,animateCitizenRagdoll,
   settleCitizenRagdoll} from './citizenRagdolls.js';
 import {citizenIdentity,updateCitizenRoutine,nextTowardNode} from './citizenRoutines.js';
+import {createCharacterLibrary,createCharacter} from './characterArt.js';
 import {
   pedestrianNode,choosePedestrianNext,
   positionOnRoute,trafficHeading,SIDEWALK_COORDS
@@ -32,21 +33,10 @@ export function populateCityLife(world){
   // rectangles on some Android / WebGL renderers.
   // A connected grid of safe footpaths around the 26m city blocks.
   // Pedestrians cross at intersections and turn instead of standing in place.
-  // Citizen geometry is instanced: 165 people are only a handful of distinct
-  // shapes/materials instead of >1100 separate meshes and draw calls.
-  const masters={head:MeshBuilder.CreateSphere('citizen head master',{diameter:.43,segments:7},world.scene),
-    leg:MeshBuilder.CreateBox('citizen leg master',{width:.18,height:.69,depth:.20},world.scene),
-    shirts:m.pedShirts.map((material,index)=>{
-      const mesh=MeshBuilder.CreateBox('citizen shirt master '+index,{width:.6,height:.83,depth:.33},world.scene);
-      mesh.material=material;return mesh;
-    }),
-    arms:m.pedShirts.map((material,index)=>{
-      const mesh=MeshBuilder.CreateBox('citizen arm master '+index,{width:.15,height:.7,depth:.2},world.scene);
-      mesh.material=material;return mesh;
-    })};
-  masters.head.material=m.pedHeads;masters.leg.material=m.pedPants;
-  world.citizenMasters=[masters.head,masters.leg,...masters.shirts,...masters.arms];
-  world.citizenMasters.forEach(master=>{master.isPickable=false;master.isVisible=false});
+  // Shared master geometry and palette, instanced into detailed
+  // low-poly people. Every resident shares meshes; no per-person materials.
+  const masters=world.characterLibrary=createCharacterLibrary(world);
+  world.citizenMasters=masters.meshes;
   const count=world.mobile?72:210;
   world.citizenMasterRefs=masters;
   world.nextCitizenId=count;
@@ -59,18 +49,8 @@ function spawnCitizen(world,i,masters){
   const target=nextTowardNode(identity.home,identity.work);
   const root=new TransformNode('citizen '+i+' '+identity.occupation,world.scene);
   root.position=V(here.x,PED_BASE_Y,here.z);
-  const shirt=Math.floor(i*13.17)%masters.shirts.length;
-  const torso=masters.shirts[shirt].createInstance('person torso '+i);
-  torso.parent=root;torso.position.y=1.20;
-  const head=masters.head.createInstance('person head '+i);
-  head.parent=root;head.position.y=1.94;
-  const legs=[],arms=[];
-  for(const side of [-1,1]){
-    const leg=masters.leg.createInstance('person leg '+i);
-    leg.parent=root;leg.position=V(side*.18,.42,0);legs.push(leg);
-    const arm=masters.arms[shirt].createInstance('person arm '+i);
-    arm.parent=root;arm.position=V(side*.42,1.18,0);arms.push(arm);
-  }
+  const appearance=createCharacter(world,root,i,{library:masters});
+  const {legs,arms,headRig}=appearance;
   const help=new TransformNode('help signal logical anchor',world.scene);
   help.parent=root;help.position.y=2.7;help.setEnabled(false);
   root.getChildMeshes().forEach(mesh=>mesh.isPickable=false);
@@ -78,7 +58,8 @@ function spawnCitizen(world,i,masters){
     threat:V(here.x+3,0,here.z+3),walkPhase:rand(0,7),speed:identity.speed,
     node:[nodeI,nodeJ],target,previous:null,legs,arms,help,walked:0,
     identity,routineGoal:null,pathGoal:null,routineActivity:'breakfast',
-    waitTime:0,socialUntil:0,lastGreeting:-100,visible:true});
+    waitTime:0,socialUntil:0,lastGreeting:-100,visible:true,
+    appearance,headRig,characterAge:appearance.age});
 }
 export function attractNewResidents(world,count=3){
   // After a district is rebuilt, new families move in; do not resurrect
@@ -254,6 +235,7 @@ export function walkPedestrian(person,dt,time=0){
   }
   person.root.rotation.z=0;
   const root=person.root, running=person.panic>0;
+  if(person.headRig)person.headRig.rotation.y*=Math.max(0,1-dt*4);
   // No teleporting: resume today's home/work/shopping itinerary after danger.
   if(person.identity&&!running){
     updateCitizenRoutine(person,time);
@@ -277,6 +259,7 @@ export function walkPedestrian(person,dt,time=0){
       person.arms[0].rotation.x=Math.sin(idle)*(person.socialUntil>time?.48:.13);
       person.arms[1].rotation.x=-person.arms[0].rotation.x;
       person.legs[0].rotation.x=person.legs[1].rotation.x=0;
+      if(person.headRig)person.headRig.rotation.y=Math.sin(idle*.44)*.19;
       root.position.y=PED_BASE_Y;
       return;
     }
@@ -398,6 +381,25 @@ export function updateCityLife(world,dt){
         p.routineActivity=other.routineActivity='socializing';
         cells.delete(key);
       }else cells.set(key,p);
+    }
+  }
+  // Real-world render cost: around 20 instanced pieces per nearby
+  // character, while tiny eyes/ears/hands are hidden beyond readable range.
+  // Update infrequently; avoid 210 distance checks every single frame.
+  world.characterLODTick=(world.characterLODTick||0)-dt;
+  if(world.characterLODTick<=0){
+    world.characterLODTick=.52;
+    const camera=world.scene?.activeCamera;
+    const cp=camera?.globalPosition||camera?.position;
+    if(cp)for(const person of world.civilians){
+      if(!person.appearance?.details)continue;
+      const dx=person.root.position.x-cp.x,
+        dz=person.root.position.z-cp.z,dy=person.root.position.y-cp.y;
+      const range=world.mobile?42:68;
+      const detailed=(dx*dx+dz*dz+dy*dy)<range*range;
+      if(person._detailVisible===detailed)continue;
+      person._detailVisible=detailed;
+      for(const part of person.appearance.details)part.setEnabled(detailed);
     }
   }
   const cam=world.scene?.activeCamera;

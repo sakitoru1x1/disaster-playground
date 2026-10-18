@@ -1,14 +1,20 @@
 import assert from 'node:assert/strict';
-import {NullEngine,Scene,MeshBuilder,TransformNode,StandardMaterial} from '@babylonjs/core';
+import {NullEngine,Scene,TransformNode,StandardMaterial,Color3} from '@babylonjs/core';
+import {createCharacterLibrary} from '../src/characterArt.js';
 import {attractNewResidents} from '../src/cityLife.js';
 import {citizenIdentity} from '../src/citizenRoutines.js';
 const engine=new NullEngine(),scene=new Scene(engine);
-const material=()=>new StandardMaterial('residents',scene);
-const m={shirts:[],arms:[],head:MeshBuilder.CreateSphere('head',{diameter:.4},scene),
- leg:MeshBuilder.CreateBox('leg',{size:.18},scene)};
-for(let i=0;i<6;i++){m.shirts.push(MeshBuilder.CreateBox('shirt',{size:.6},scene));m.arms.push(MeshBuilder.CreateBox('arm',{size:.2},scene))}
-const world={scene,mobile:false,materials:{helpSign:material()},
- citizenMasterRefs:m,civilians:[],nextCitizenId:210};
+const mats=new Map();
+const world={scene,mobile:false,materials:{},
+ civilians:[],nextCitizenId:210,
+ mat:(name,color)=>{
+  if(!mats.has(name)){
+   const m=new StandardMaterial(name,scene);
+   m.diffuseColor=Color3.FromHexString(color);mats.set(name,m);
+  }
+  return mats.get(name);
+ }};
+world.citizenMasterRefs=world.characterLibrary=createCharacterLibrary(world);
 const dead=[];
 for(let i=0;i<5;i++){
  const root=new TransformNode('dead-resident',scene);
