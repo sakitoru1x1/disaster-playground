@@ -27,14 +27,16 @@ const {chromium,devices}=require('playwright');
     if(visible==='none')throw Error('Mobile flight arrows invisible');
    }
    const canvas=page.locator('#renderCanvas'),rect=await canvas.boundingBox();
-   const startYaw=entered.yaw;
+   const startYaw=entered.yaw,startPitch=entered.pitch;
    await page.mouse.move(rect.x+rect.width*.49,rect.y+rect.height*.36);
    await page.mouse.down();
    await page.mouse.move(rect.x+rect.width*.56,rect.y+rect.height*.40,{steps:4});
    await page.mouse.up();
    const turned=await page.evaluate(()=>window.disasterDebug.getFly());
-   if(Math.abs(turned.yaw-startYaw)<.06)
-    throw Error('Free look drag did not rotate camera');
+   if(turned.yaw<startYaw+.06)
+    throw Error('Horizontal FLY look was not inverted');
+   if(turned.pitch<startPitch+.02)
+    throw Error('Vertical FLY look was not inverted');
    const first=turned.position;
    await page.evaluate(()=>window.disasterDebug.flyButton('up',true));
    await page.waitForTimeout(4200);

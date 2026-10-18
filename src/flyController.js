@@ -37,8 +37,9 @@ export class FlyController{
   window.addEventListener('blur',this.onBlur);
  }
  look(dx,dy){
-  this.yaw-=dx*.0033;
-  this.pitch=clamp(this.pitch-dy*.0033,-Math.PI*.49,Math.PI*.49);
+  // Inverted touch/mouse drag on both axes: move the view with the finger.
+  this.yaw+=dx*.0033;
+  this.pitch=clamp(this.pitch+dy*.0033,-Math.PI*.49,Math.PI*.49);
   this.camera.rotation.set(this.pitch,this.yaw,0);
  }
  setEnabled(enabled){
