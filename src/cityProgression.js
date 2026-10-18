@@ -1,6 +1,7 @@
 import {MeshBuilder,TransformNode,PhysicsAggregate,PhysicsShapeType,PhysicsMotionType,Quaternion,Vector3} from '@babylonjs/core';
 import {trafficRoutes,positionOnRoute,trafficHeading} from './cityMotion.js';
 import {planCity} from './cityLayout.js';
+import {RecoveryConvoy} from './cityRecovery.js';
 const V=(x,y,z)=>new Vector3(x,y,z);
 function distance(a,b){return Math.hypot(a.x-b.x,a.z-b.z)}
 export class CityProgression {
@@ -10,11 +11,12 @@ export class CityProgression {
   this.nextConstruction=65;
   this.emergencyVehicles=0;this.active=false;this.needsDispatch=false;
   this.nextRepair=0;this.rescueCooldown=0;this.day=1;this.lightPhase=0;
+  this.recovery=new RecoveryConvoy(world,this);
  }
  event(type){
   this.lastDisaster=this.world.time;
   this.active=true;this.needsDispatch=true;
-  this.incidents++;
+  this.incidents++;this.recovery.event();
  }
  launchResponders(){
   const world=this.world;
@@ -105,33 +107,19 @@ export class CityProgression {
     }
    }
   }
-  // The city regrows only AFTER incidents have passed; lower floors are
-  // always repaired before higher storeys, without teleporting entire blocks.
-  if(danger||time-this.lastDisaster<17||world.pendingFailures.length)return;
-  this.tryBuildNewBlock(time);
-  if(time<this.nextRepair)return;
-  this.nextRepair=time+ (world.mobile?5.5:3.5);
-  const candidates=[...world.buildings,...(world.districtBuildings||[])].filter(b=>b.floors.some(e=>e.active));
-  if(!candidates.length)return;
-  const b=candidates[this.rebuilt%candidates.length];
-  const floor=b.floors.find(e=>e.active);
-  if(!floor)return;
-  floor.mesh.setEnabled(true);
-  floor.aggregate=new PhysicsAggregate(floor.mesh,PhysicsShapeType.BOX,
-    {mass:0,friction:.84,restitution:.08},world.scene);
-  floor.active=false;floor.health=floor.maxHealth;
-  floor.damageTaken=0;floor.damageMarks=0;floor.pendingFailure=false;
-  world.brokenFloors=Math.max(0,world.brokenFloors-1);
-  b.destroyed=b.floors.every(e=>e.active);
-  // Progressively remove only long-settled fragments in the repaired lot.
-  for(let i=world.rubble.length-1,removed=0;i>=0&&removed<8;i--){
-   const mesh=world.rubble[i];
-   if(mesh.isDisposed()){world.rubble.splice(i,1);continue}
-   if(mesh.position.y>3.1||distance(mesh.position,floor.mesh.position)>floor.size.x*.72)continue;
-   mesh.dispose();world.rubble.splice(i,1);removed++;
-  }
-  this.rebuilt++;
+  // A visible municipal workflow replaces the old magical one-floor repair:
+  // helicopter clears each building's rubble, concrete mixers fill craters,
+  // then trucks and a mobile crane replace storeys from the foundation up.
+  if(danger||time-this.lastDisaster<7)return;
+  // A completely leveled city can have hundreds of cascading failures.
+  // Dispatch the cleanup helicopter after a bounded wait, even if a few
+  // sections are still settling. Delay actual rebuilding until stable.
+  if(world.pendingFailures.length&&time-this.lastDisaster<24)return;
+  if(world.pendingFailures.length&&['fill','build'].includes(this.recovery.stage))return;
+  this.recovery.tick(dt);
+  if(this.recovery.stage==='complete')this.tryBuildNewBlock(time);
  }
+
  tryBuildNewBlock(time){
   const world=this.world;
   if(time<this.nextConstruction)return false;
@@ -166,6 +154,7 @@ export class CityProgression {
  stats(){
   return {day:this.day,incidents:this.incidents,rescued:this.rescued,rebuilt:this.rebuilt,constructed:this.constructed,
    emergencyVehicles:this.world.props.filter(p=>p.emergency&&p.traffic?.state==='driving').length,dispatchPending:this.needsDispatch,
-   injured:this.world.civilians.filter(p=>p.state==='injured').length};
+   injured:this.world.civilians.filter(p=>p.state==='injured').length,
+   recovery:this.recovery.currentState()};
  }
 }

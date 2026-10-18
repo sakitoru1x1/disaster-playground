@@ -125,7 +125,8 @@ function updateStats(dt){
   if(world.progression){
     const c=world.progression.stats();
     $('#cityProgress').textContent='DAY '+c.day+' · RESCUED '+c.rescued+
-      ' · REBUILT '+c.rebuilt+(c.constructed?' · NEW '+c.constructed:'');
+      ' · REBUILT '+c.rebuilt+(c.constructed?' · NEW '+c.constructed:'')+
+      (c.recovery.phase!=='idle'?' · '+({sweep:'HELI',fill:'MIXER',build:'CRANE'}[c.recovery.stage]||'RECOVERY'):'');
   }
   $('#damage').textContent=(100-integrity)+'%';
   $('#clock').textContent=timestamp();
@@ -515,6 +516,19 @@ async function createGame(){
       trees:world.trees.slice(0,12).map(t=>({x:t.root.position.x,y:t.root.position.y,z:t.root.position.z})),
       people:world.civilians.slice(0,15).map(p=>({x:p.root.position.x,y:p.root.position.y,z:p.root.position.z}))
     }),
+    getRecovery:()=>world.progression.recovery.currentState(),
+    // QA harness only: skip real-time waiting to verify all three recovery
+    // phases deterministically, without introducing cheat controls in UI.
+    tickRecoveryForTest:(seconds=1)=>{
+      world.time+=Math.min(4,Math.max(.02,seconds));
+      world.progression.recovery.tick(Math.min(4,Math.max(.02,seconds)));
+      return {recovery:world.progression.recovery.currentState(),
+        craters:world.terrainCraters.length,broken:world.brokenFloors};
+    },
+    makeCraterForTest:(x=0,z=0,power=.65)=>{
+      world.progression.event('meteor');
+      return world.damageTerrain(x,z,power,'meteor');
+    },
     getCitizenDebug:()=>({count:world.civilians.length,
       visible:world.civilians.filter(p=>p.visible!==false).length,
       instancedMeshes:world.civilians.reduce((n,p)=>n+p.legs.length+p.arms.length+2,0),

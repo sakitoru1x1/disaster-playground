@@ -54,36 +54,59 @@ export function populateCityLife(world){
   world.citizenMasters=[masters.head,masters.leg,...masters.shirts,...masters.arms];
   world.citizenMasters.forEach(master=>{master.isPickable=false;master.isVisible=false});
   const count=world.mobile?72:210;
-  for(let i=0;i<count;i++){
-    const identity=citizenIdentity(i),[nodeI,nodeJ]=identity.home;
-    const here=pedestrianNode(nodeI,nodeJ);
-    const target=nextTowardNode(identity.home,identity.work);
-    const root=new TransformNode('citizen '+i+' '+identity.occupation,world.scene);
-    root.position=V(here.x,PED_BASE_Y,here.z);
-    const shirt=Math.floor(i*13.17)%masters.shirts.length;
-    const torso=masters.shirts[shirt].createInstance('person torso '+i);
-    torso.parent=root;torso.position.y=1.20;
-    const head=masters.head.createInstance('person head '+i);
-    head.parent=root;head.position.y=1.94;
-    const legs=[],arms=[];
-    for(const side of [-1,1]){
-      const leg=masters.leg.createInstance('person leg '+i);
-      leg.parent=root;leg.position=V(side*.18,.42,0);legs.push(leg);
-      const arm=masters.arms[shirt].createInstance('person arm '+i);
-      arm.parent=root;arm.position=V(side*.42,1.18,0);arms.push(arm);
-    }
-    const help=MeshBuilder.CreatePlane('injured HELP signal',
-      {width:1.55,height:.72},world.scene);
-    help.parent=root;help.position.y=2.95;help.billboardMode=Mesh.BILLBOARDMODE_ALL;
-    help.material=m.helpSign;help.isPickable=false;help.setEnabled(false);
-    root.getChildMeshes().forEach(mesh=>mesh.isPickable=false);
-    world.civilians.push({root,x:here.x,z:here.z,state:'walking',panic:0,exposure:0,
-      threat:V(here.x+3,0,here.z+3),walkPhase:rand(0,7),speed:identity.speed,
-      node:[nodeI,nodeJ],target,previous:null,legs,arms,help,walked:0,
-      identity,routineGoal:null,pathGoal:null,routineActivity:'breakfast',
-      waitTime:0,socialUntil:0,lastGreeting:-100,visible:true});
-  }
+  world.citizenMasterRefs=masters;
+  world.nextCitizenId=count;
+  for(let i=0;i<count;i++)spawnCitizen(world,i,masters);
 }
+function spawnCitizen(world,i,masters){
+  const m=world.materials;
+  const identity=citizenIdentity(i),[nodeI,nodeJ]=identity.home;
+  const here=pedestrianNode(nodeI,nodeJ);
+  const target=nextTowardNode(identity.home,identity.work);
+  const root=new TransformNode('citizen '+i+' '+identity.occupation,world.scene);
+  root.position=V(here.x,PED_BASE_Y,here.z);
+  const shirt=Math.floor(i*13.17)%masters.shirts.length;
+  const torso=masters.shirts[shirt].createInstance('person torso '+i);
+  torso.parent=root;torso.position.y=1.20;
+  const head=masters.head.createInstance('person head '+i);
+  head.parent=root;head.position.y=1.94;
+  const legs=[],arms=[];
+  for(const side of [-1,1]){
+    const leg=masters.leg.createInstance('person leg '+i);
+    leg.parent=root;leg.position=V(side*.18,.42,0);legs.push(leg);
+    const arm=masters.arms[shirt].createInstance('person arm '+i);
+    arm.parent=root;arm.position=V(side*.42,1.18,0);arms.push(arm);
+  }
+  const help=MeshBuilder.CreatePlane('injured HELP signal',
+    {width:1.55,height:.72},world.scene);
+  help.parent=root;help.position.y=2.95;help.billboardMode=Mesh.BILLBOARDMODE_ALL;
+  help.material=m.helpSign;help.isPickable=false;help.setEnabled(false);
+  root.getChildMeshes().forEach(mesh=>mesh.isPickable=false);
+  world.civilians.push({root,x:here.x,z:here.z,state:'walking',panic:0,exposure:0,
+    threat:V(here.x+3,0,here.z+3),walkPhase:rand(0,7),speed:identity.speed,
+    node:[nodeI,nodeJ],target,previous:null,legs,arms,help,walked:0,
+    identity,routineGoal:null,pathGoal:null,routineActivity:'breakfast',
+    waitTime:0,socialUntil:0,lastGreeting:-100,visible:true});
+}
+export function attractNewResidents(world,count=3){
+  // After a district is rebuilt, new families move in; do not resurrect
+  // citizens who actually died in a disaster.
+  const capacity=world.mobile?72:210;
+  const alive=world.civilians.filter(p=>p.identity&&p.state!=='dead').length;
+  const arrivals=Math.max(0,Math.min(count,capacity-alive));
+  if(!world.citizenMasterRefs||arrivals<=0)return 0;
+  for(let i=0;i<arrivals;i++){
+    const deadIndex=world.civilians.findIndex(p=>p.identity&&p.state==='dead');
+    if(deadIndex!==-1){
+      const dead=world.civilians.splice(deadIndex,1)[0];
+      dead.root.dispose(false,false);
+    }
+    spawnCitizen(world,world.nextCitizenId++,world.citizenMasterRefs);
+  }
+  world.returnedResidents=(world.returnedResidents||0)+arrivals;
+  return arrivals;
+}
+
 
 function injureCivilian(world,p){
   if(p.state==='dead'||p.state==='injured')return;

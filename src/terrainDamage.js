@@ -26,12 +26,9 @@ export function groundHeightAt(x,z,craters){
 // than standing at their original street height over the crater.
 export const terrainDisplacement=(x,z,craters)=>
  groundHeightAt(x,z,craters)+.035;
-export function applyCrater(world,x,z,power=1,kind='meteor'){
- if(world.terrainCraters.length>=7)world.terrainCraters.shift();
- const k=clamp(power,0,1);
- const c={x,z,radius:(kind==='quake'?6:3)+k*(kind==='quake'?13:16),
-  depth:(kind==='quake'?.22:.65)+k*(kind==='quake'?1.3:2.7),kind};
- world.terrainCraters.push(c);
+// Rebuild geometry and Havok collision after adding OR removing a crater.
+// The same source height function controls mesh, roads, objects and vehicles.
+export function recomputeCraterTerrain(world){
  const mesh=world.ground,craters=world.terrainCraters;
  const positions=mesh.getVerticesData(VertexBuffer.PositionKind,true);
  const colors=[];
@@ -81,8 +78,44 @@ export function applyCrater(world,x,z,power=1,kind='meteor'){
   detail.position.y=detail.metadata.terrainBaseY+
    terrainDisplacement(detail.position.x,detail.position.z,craters);
  }
+ world.terrainDeformations=(world.terrainDeformations||0)+1;
+}
+export function fillCrater(world,crater){
+ const index=world.terrainCraters.indexOf(crater);
+ if(index===-1)return false;
+ world.terrainCraters.splice(index,1);
+ recomputeCraterTerrain(world);
+ // Obsolete scorch marks no longer cover the repaired asphalt.
+ for(let i=world.scars.length-1;i>=0;i--){
+  const mark=world.scars[i],p=mark.position;
+  if(Math.hypot(p.x-crater.x,p.z-crater.z)<crater.radius*1.15){
+   const mat=mark.material;
+   mark.dispose();mat?.dispose();world.scars.splice(i,1);
+  }
+ }
+ return true;
+}
+
+export function applyCrater(world,x,z,power=1,kind='meteor'){
+ if(world.terrainCraters.length>=7)world.terrainCraters.shift();
+ const k=clamp(power,0,1);
+ const c={x,z,radius:(kind==='quake'?6:3)+k*(kind==='quake'?13:16),
+  depth:(kind==='quake'?.22:.65)+k*(kind==='quake'?1.3:2.7),kind};
+ // Fresh craters also excavate any concrete patch laid by recovery trucks;
+ // otherwise an old patch hovers above the newly deformed road.
+ for(let i=(world.pouredConcrete||[]).length-1;i>=0;i--){
+  const patch=world.pouredConcrete[i];
+  if(patch.isDisposed()){world.pouredConcrete.splice(i,1);continue}
+  if(Math.hypot(patch.position.x-x,patch.position.z-z)<c.radius+
+     patch.getBoundingInfo().boundingBox.extendSize.x){
+   patch.material?.dispose();patch.dispose();world.pouredConcrete.splice(i,1);
+  }
+ }
+ world.terrainCraters.push(c);
+ recomputeCraterTerrain(world);
  // Vehicles already driving into the freshly excavated footprint must lose
  // their kinematic target and fall into the hole as DYNAMIC Havok rigid bodies.
+ const craters=world.terrainCraters;
  for(const car of world.props){
   if(car.type!=='car'||car.traffic?.state!=='driving'||!car.aggregate)continue;
   const p=car.mesh.position;
@@ -105,7 +138,6 @@ export function applyCrater(world,x,z,power=1,kind='meteor'){
     foundation.mesh.position,'terrain');
   }
  }
- world.terrainDeformations=(world.terrainDeformations||0)+1;
  return c;
 }
 export function initializeTerrain(world){

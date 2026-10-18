@@ -19,7 +19,9 @@
     "test:citizens": "node tests/citizenRoutines.test.mjs",
     "test:behavior": "node tests/cityLifeBehavior.test.mjs",
     "test:disasters": "node tests/disasterCoverage.test.mjs",
-    "test:browser": "node tests/browserSmoke.cjs"
+    "test:browser": "node tests/browserSmoke.cjs",
+    "test:recovery": "node tests/cityRecovery.test.mjs && node tests/returningResidents.test.mjs",
+    "test:recovery:e2e": "node tests/recoveryIntegration.cjs"
   },
   "dependencies": {
     "@babylonjs/core": "^9.31.0",
